@@ -1,0 +1,26 @@
+See https://workflowy.com/#/6430fa24407f
+
+The toplevel is a weird hybrid between a REPL and a compiler.
+You could say it's like a compiler server.
+You can:
+- load definitions into it
+- ask for values out of it
+The runtime must also be able to:
+- extract main
+- install effect handlers for important things like mutation and IO
+- eval main in the context of those effect handlers
+
+Examples:
+- even/odd functions
+- unix wc
+- unix grep
+
+; first load this definition.
+; this succeeds even though odd? isn't defined yet.
+(define even? (lambda (n) (if (= n 0) #true (odd? (- n 1)))))
+; at this point if you try to extract the value of even?,
+; it fails because odd? isn't defined yet.
+
+(define odd? (lambda (n) (if (= n 0) #true (even? (- n 1)))))
+
+
