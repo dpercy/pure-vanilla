@@ -1,5 +1,6 @@
 #lang typed/racket
 
+
 (module+ test
   (require/typed rackunit
     [check-equal? (-> Any Any Void)]))
@@ -48,6 +49,7 @@
     ['() h]
     [(cons k keys) (hash-remove* (hash-remove h k)
                                  keys)]))
+
 (define (subst [expr : Expr] [vars : (HashTable Symbol Expr)]) : Expr
   (match expr
     [(Var name)  (hash-ref vars name (lambda () expr))]
@@ -102,7 +104,10 @@
       [_ #false]))
   (with-handlers ([exn-fail-promise? (lambda (exn)
                                        (Error "cyclic definition"))])
-    (force (hash-ref env name))))
+    (force (hash-ref env name
+                     (lambda ()
+                       (delay
+                         (Error "unbound variable")))))))
 (module+ test
   (check-equal? (env-ref (hash 'x (delay (Lit 123)))
                          'x)
@@ -112,8 +117,53 @@
                          'x)
                 (Error "cyclic definition")))
 
-(define (eval-expr [expr : Expr] [env : Env (hash)]) : Expr
-  (Error "TODO"))
+(define empty-env : Env (hash))
+
+(: eval-expr (->* (Expr) (Env) Expr))
+(define (eval-expr expr [env empty-env])
+  (match expr
+    [(Var name) (env-ref env name)]
+    [(Lit value) expr]
+    [(Cons head tail) (match (eval-expr head env)
+                        [(? Error? err) err]
+                        [head*
+                         (match (eval-expr tail env)
+                           [(? Error? err) err]
+                           [(not (Lit '()) (Cons _ _))
+                            (Error "cons onto non-list")]
+                           [tail*
+                            (Cons head* tail*)])])]
+    [(Func params body) expr]
+    [(App func args) (match (eval-expr func env)
+                       [(? Error? err) err]
+                       [func*
+                        (let ([args* (let recur : (U Error (Listof Expr))
+                                          ([args args])
+                                          (match args
+                                            ['() '()]
+                                            [(cons a args)
+                                             (match (eval-expr a env)
+                                               [(? Error? err) err]
+                                               [a*
+                                                (match (recur args)
+                                                  [(? Error? err) err]
+                                                  [(? list? args*)
+                                                   (cons a* args*)])])]))])
+                          (match args*
+                            [(? Error? err) err]
+                            [(? list? args*)
+                             (match func*
+                               [(Func params body)
+                                ; toDO check arity
+                                (if (= (length params)
+                                       (length args*))
+                                    (subst body (for/hash : (HashTable Symbol Expr)
+                                                          ([p params]
+                                                           [a args*])
+                                                  (values p a)))
+                                    (Error "arity mismatch"))]
+                               [_ (Error "apply non-function")])]))])]
+    [(? Error? err) err]))
 (module+ test
   ; easy app case
   (check-equal? (eval-expr (App (Func '(x y z)
@@ -129,12 +179,26 @@
                             (Cons (Lit 2)
                                   (Lit '())))))
 
+  ; closure:
+  ; (\x y -> [x, y]) 123  ==>  (\y -> [123, y])
+  ; This case really encourages a substitution model.
+  (check-equal? (eval-expr (App (Func '(x)
+                                      (Func '(y)
+                                            (Cons (Var 'x)
+                                                  (Cons (Var 'y)
+                                                        (Lit '())))))
+                                (list (Lit 123))))
+                (Func '(y)
+                      (Cons (Lit 123)
+                            (Cons (Var 'y)
+                                  (Lit '())))))
+
   ; errors propagate up
   (check-equal? (eval-expr (Error "foo")) (Error "foo"))
   (check-equal? (eval-expr (Cons (Error "foo") (Lit '()))) (Error "foo"))
   ; first error wins
   (check-equal? (eval-expr (App (Lit 1) (list (Error "A") (Error "B"))))
-                (Error "B"))
+                (Error "A"))
   (check-equal? (eval-expr (App (Error "F") (list (Error "A") (Error "B"))))
                 (Error "F"))
 
@@ -176,10 +240,20 @@
 (module+ test
 
   ; variable lookup looks in defs
+  (check-equal? (eval-defs (list (Def 'a (Var 'c))
+                                 (Def 'b (Var 'a))
+                                 (Def 'c (Lit 123))))
+                (list (Def 'a (Lit 123))
+                      (Def 'b (Lit 123))
+                      (Def 'c (Lit 123))))
 
   ; variable lookup into error def is that error
-
-  ; cyclic defs is an error
+  (check-equal? (eval-defs (list (Def 'a (Var 'c))
+                                 (Def 'b (Var 'a))
+                                 (Def 'c (Error "ow"))))
+                (list (Def 'a (Error "ow"))
+                      (Def 'b (Error "ow"))
+                      (Def 'c (Error "ow"))))
 
   ; cyclic definition is an error
   (check-equal? (eval-defs (list (Def 'main (Var 'main))))
