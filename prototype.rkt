@@ -26,6 +26,9 @@
 (struct Cons Expr ([head : Expr]
                    [tail : Expr]) #:transparent)
 
+(struct Tag Expr ([key : Expr]
+                  [value : Expr]) #:transparent)
+
 (struct Func Expr ([params : (Listof Symbol)]
                    [body : Expr]) #:transparent)
 
@@ -41,7 +44,10 @@
   (U 'empty?
      'cons?
      'first
-     'rest))
+     'rest
+     'untag
+     'tagged?
+     ))
 
 ; TODO many many more primitives - subsume cons?
 ; - cons is different from first in that it's a constructor
@@ -64,6 +70,8 @@
     [(Var name)  (hash-ref vars name (lambda () expr))]
     [(Lit value)  expr]
     [(Prim name) expr]
+    [(Tag key value) (Tag (subst key vars)
+                          (subst value vars))]
     [(Cons head tail)  (Cons (subst head vars)
                              (subst tail vars))]
     [(Func params body)  (Func params
@@ -141,6 +149,12 @@
                   [(? Expr? v) v])]
     [(Lit value) expr]
     [(Prim name) expr]
+    [(Tag key value) (match (eval-expr key env)
+                       [(? Error? err) err]
+                       [(and key* (Lit (? symbol?))) (match (eval-expr value env)
+                                                       [(? Error? err) err]
+                                                       [value* (Tag key* value*)])]
+                       [_ (Error "tag key must be a symbol")])]
     [(Cons head tail) (match (eval-expr head env)
                         [(? Error? err) err]
                         [head*
@@ -206,7 +220,22 @@
                        [(list bad) (Error (format "first non-cons: ~v" bad))]))]
     ['rest (arity 1 (match args
                       [(list (Cons _ tail)) tail]
-                      [(list bad) (Error (format "rest non-cons: ~v" bad))]))]))
+                      [(list bad) (Error (format "rest non-cons: ~v" bad))]))]
+    ['tagged? (arity 2 (match args
+                         [(list (Lit (? symbol? s0))
+                                (Tag (Lit (? symbol? s1)) _))  (Lit (symbol=? s0 s1))]
+                         [_ (Lit #false)]))]
+    ['untag (arity 2 (match args
+                       [(list key0 tagged)
+                        (match key0
+                          [(Lit (? symbol? s0))
+                           (match tagged
+                             [(Tag (Lit (? symbol? s1)) value)
+                              (if (symbol=? s0 s1)
+                                  value
+                                  (Error "untag key mismatch"))]
+                             [_ (Error "untag arg must be a tagged value")])]
+                          [_ (Error "untag key must be a symbol")])]))]))
 (module+ test
   ; easy app case
   (check-equal? (eval-expr (App (Func '(x y z)
@@ -309,6 +338,50 @@
                                (Error "larry")
                                (Error "curly")))
                 (Error "moe"))
+
+  ; data abstraction - tagging and untagging.
+  ; A symbol is a capability for identifying, creating, and inspecting tagged values.
+  ; - tagging
+  (check-equal? (eval-expr (Tag (If (Lit #true) (Lit 'dog) (Error "no"))
+                                (If (Lit #false) (Error "no") (Lit "fido"))))
+                (Tag (Lit 'dog)
+                     (Lit "fido")))
+  ; - tag must be a symbol
+  (check-equal? (eval-expr (Tag (Lit "dog")
+                                (Lit "fido")))
+                (Error "tag key must be a symbol"))
+  ; - check tag
+  (check-equal? (eval-expr (App (Prim 'tagged?)
+                                (list (Lit 'dog)
+                                      (Tag (Lit 'dog) (Lit "fido")))))
+                (Lit #true))
+  (check-equal? (eval-expr (App (Prim 'tagged?)
+                                (list (Lit 'cat)
+                                      (Tag (Lit 'dog) (Lit "fido")))))
+                (Lit #false))
+  ; - untagging
+  (check-equal? (eval-expr (App (Prim 'untag)
+                                (list (Lit 'dog)
+                                      (Tag (Lit 'dog)
+                                           (Lit "fido")))))
+                (Lit "fido"))
+  ; - untag key must be a symbol
+  (check-equal? (eval-expr (App (Prim 'untag)
+                                (list (Lit "dog")
+                                      (Tag (Lit 'dog)
+                                           (Lit "fido")))))
+                (Error "untag key must be a symbol"))
+  ; - untag 2nd arg must be a tagged value
+  (check-equal? (eval-expr (App (Prim 'untag)
+                                (list (Lit 'dog)
+                                      (Lit 57))))
+                (Error "untag arg must be a tagged value"))
+  ; - untag keys must match
+  (check-equal? (eval-expr (App (Prim 'untag)
+                                (list (Lit 'cat)
+                                      (Tag (Lit 'dog)
+                                           (Lit "fido")))))
+                (Error "untag key mismatch"))
 
   ;;
   )
