@@ -5,6 +5,9 @@
   (require/typed rackunit
     [check-equal? (-> Any Any Void)]))
 
+; Values are a special case of expressions.
+; Errors are also a special case of expressions.
+; So evaluation can just consume and produce expressions.
 
 (struct Expr () #:transparent)
 
@@ -20,7 +23,6 @@
                               Null
                               )]) #:transparent)
 
-; TODO maybe cons can be just a global function?
 (struct Cons Expr ([head : Expr]
                    [tail : Expr]) #:transparent)
 
@@ -30,18 +32,25 @@
 (struct App Expr ([func : Expr]
                   [args : (Listof Expr)]) #:transparent)
 
+(struct If Expr ([test : Expr]
+                 [consq : Expr]
+                 [alt : Expr]) #:transparent)
+
+(struct Prim Expr ([name : PrimName]) #:transparent)
+(define-type PrimName
+  (U 'empty?
+     'cons?
+     'first
+     'rest))
+
 ; TODO many many more primitives - subsume cons?
 ; - cons is different from first in that it's a constructor
 ; - cons is more like lit than like first/rest/plus, etc
-; TODO conditionals
+
 
 ; For now errors have a statically fixed message - it's not an expression.
 (struct Error Expr ([msg : String]) #:transparent)
 
-
-; Values are just a subset of expressions.
-; We're not going to define a type for them though,
-; because Cons can be a value or not depending on its fields.
 
 (: hash-remove* (All (K V) (-> (HashTable K V) (Listof K) (HashTable K V))))
 (define (hash-remove* h keys)
@@ -54,13 +63,17 @@
   (match expr
     [(Var name)  (hash-ref vars name (lambda () expr))]
     [(Lit value)  expr]
+    [(Prim name) expr]
     [(Cons head tail)  (Cons (subst head vars)
                              (subst tail vars))]
     [(Func params body)  (Func params
                                (subst body (hash-remove* vars params)))]
     [(App func args)  (App (subst func vars)
                            (for/list ([a args])
-                             (subst a vars)))]))
+                             (subst a vars)))]
+    [(If test consq alt) (If (subst test vars)
+                             (subst consq vars)
+                             (subst alt vars))]))
 (module+ test
   ; easy cases
   (check-equal? (subst (Lit 0) (hash 'x (Lit 1)))
@@ -124,6 +137,7 @@
   (match expr
     [(Var name) (env-ref env name)]
     [(Lit value) expr]
+    [(Prim name) expr]
     [(Cons head tail) (match (eval-expr head env)
                         [(? Error? err) err]
                         [head*
@@ -134,6 +148,11 @@
                            [tail*
                             (Cons head* tail*)])])]
     [(Func params body) expr]
+    [(If test consq alt) (match (eval-expr test env)
+                           [(? Error? err) err]
+                           [(Lit #true) (eval-expr consq env)]
+                           [(Lit #false) (eval-expr alt env)]
+                           [bad (Error (format "if non-boolean: ~v" bad))])]
     [(App func args) (match (eval-expr func env)
                        [(? Error? err) err]
                        [func*
@@ -153,17 +172,38 @@
                             [(? Error? err) err]
                             [(? list? args*)
                              (match func*
+                               [(Prim name)
+                                (apply-prim name args*)]
                                [(Func params body)
-                                ; toDO check arity
                                 (if (= (length params)
                                        (length args*))
-                                    (subst body (for/hash : (HashTable Symbol Expr)
-                                                          ([p params]
-                                                           [a args*])
-                                                  (values p a)))
+                                    ; subst and then keep evaluating!
+                                    (eval-expr (subst body (for/hash : (HashTable Symbol Expr)
+                                                                     ([p params]
+                                                                      [a args*])
+                                                             (values p a)))
+                                               env)
                                     (Error "arity mismatch"))]
                                [_ (Error "apply non-function")])]))])]
     [(? Error? err) err]))
+(define (apply-prim [name : PrimName] [args : (Listof Expr)]) : Expr
+  (define-syntax-rule (arity n expr)
+    (if (not (= n (length args)))
+        (Error "arity mismatch")
+        expr))
+  (match name
+    ['empty? (arity 1 (match args
+                        [(list (Lit '())) (Lit #true)]
+                        [_ (Lit #false)]))]
+    ['cons? (arity 1 (match args
+                       [(list (Cons _ _)) (Lit #true)]
+                       [_ (Lit #false)]))]
+    ['first (arity 1 (match args
+                       [(list (Cons head _)) head]
+                       [(list bad) (Error (format "first non-cons: ~v" bad))]))]
+    ['rest (arity 1 (match args
+                      [(list (Cons _ tail)) tail]
+                      [(list bad) (Error (format "rest non-cons: ~v" bad))]))]))
 (module+ test
   ; easy app case
   (check-equal? (eval-expr (App (Func '(x y z)
@@ -224,6 +264,49 @@
   (check-equal? (eval-expr (Var 'x))
                 (Error "unbound variable"))
 
+  ; primitives
+  (check-equal? (eval-expr (App (Prim 'first)
+                                (list (Cons (Lit 1)
+                                            (Cons (Lit 2)
+                                                  (Lit '()))))))
+                (Lit 1))
+  (check-equal? (eval-expr (App (Prim 'rest)
+                                (list (Cons (Lit 1)
+                                            (Cons (Lit 2)
+                                                  (Lit '()))))))
+                (Cons (Lit 2)
+                      (Lit '())))
+  (check-equal? (eval-expr (App (Prim 'empty?)
+                                (list (Cons (Lit 1)
+                                            (Cons (Lit 2)
+                                                  (Lit '()))))))
+                (Lit #false))
+  (check-equal? (eval-expr (App (Prim 'cons?)
+                                (list (Cons (Lit 1)
+                                            (Cons (Lit 2)
+                                                  (Lit '()))))))
+                (Lit #true))
+
+  ; conditionals
+  (check-equal? (eval-expr (If (Lit #true)
+                               (Lit 'yes)
+                               (Error "no")))
+                (Lit 'yes))
+  (check-equal? (eval-expr (If (Lit #false)
+                               (Error "no")
+                               (Lit 'yes)))
+                (Lit 'yes))
+  ; if on non-boolean is an error
+  (check-equal? (eval-expr (If (Lit 5)
+                               (Lit "hello")
+                               (Lit "goodbye")))
+                (Error "if non-boolean: (Lit 5)"))
+  ; if error is the first error
+  (check-equal? (eval-expr (If (Error "moe")
+                               (Error "larry")
+                               (Error "curly")))
+                (Error "moe"))
+
   ;;
   )
 
@@ -266,6 +349,33 @@
                 (list (Def 'a (Lit 123))
                       (Def 'b (Error "derp"))
                       (Def 'c (Lit 123))))
+
+  ; example program
+  (check-equal? (fourth (eval-defs
+                         (list (Def 'map (Func '(f lst)
+                                               (If (App (Prim 'cons?)
+                                                        (list (Var 'lst)))
+                                                   (Cons (App (Var 'f)
+                                                              (list (App (Prim 'first)
+                                                                         (list (Var 'lst)))))
+                                                         (App (Var 'map)
+                                                              (list (Var 'f)
+                                                                    (App (Prim 'rest)
+                                                                         (list (Var 'lst))))))
+                                                   (Lit '()))))
+                               (Def 'example (Cons (Lit 1)
+                                                   (Cons (Lit 'x)
+                                                         (Cons (Lit "foo")
+                                                               (Lit '())))))
+                               (Def 'func (Func '(x)
+                                                (Cons (Var 'x) (Cons (Var 'x) (Lit '())))))
+                               (Def 'result (App (Var 'map)
+                                                 (list (Var 'func)
+                                                       (Var 'example)))))))
+                (Def 'result (Cons (Cons (Lit 1) (Cons (Lit 1) (Lit '())))
+                                   (Cons (Cons (Lit 'x) (Cons (Lit 'x) (Lit '())))
+                                         (Cons (Cons (Lit "foo") (Cons (Lit "foo") (Lit '())))
+                                               (Lit '()))))))
 
 
 
