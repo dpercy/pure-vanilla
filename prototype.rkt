@@ -110,17 +110,16 @@
                      (list (Lit 1) (Lit 2)))))
 
 (define-type Env (HashTable Symbol (Promise Expr)))
-(define (env-ref [env : Env] [name : Symbol]) : Expr
+(define (env-ref [env : Env] [name : Symbol]) : (U 'unbound 'cycle Expr)
   (define (exn-fail-promise? exn)
     (match exn
       [(exn:fail (regexp "^force: reentrant promise") _) #true]
       [_ #false]))
   (with-handlers ([exn-fail-promise? (lambda (exn)
-                                       (Error "cyclic definition"))])
+                                       'cycle)])
     (force (hash-ref env name
                      (lambda ()
-                       (delay
-                         (Error "unbound variable")))))))
+                       (delay 'unbound))))))
 (module+ test
   (check-equal? (env-ref (hash 'x (delay (Lit 123)))
                          'x)
@@ -128,14 +127,18 @@
   (check-equal? (env-ref (hash 'x (letrec ([p : (Promise Expr) (delay (force p))])
                                     p))
                          'x)
-                (Error "cyclic definition")))
+                'cycle))
 
 (define empty-env : Env (hash))
 
 (: eval-expr (->* (Expr) (Env) Expr))
 (define (eval-expr expr [env empty-env])
   (match expr
-    [(Var name) (env-ref env name)]
+    [(Var name) (match (env-ref env name)
+                  ['unbound (Error "unbound variable")]
+                  ['cycle (Error "cyclic definition")]
+                  [(? Error?) (Error (format "relies on a bad definition: ~a" name))]
+                  [(? Expr? v) v])]
     [(Lit value) expr]
     [(Prim name) expr]
     [(Cons head tail) (match (eval-expr head env)
@@ -319,7 +322,10 @@
   ; 2. force all the promises
   (for/list ([def defs])
     (match def
-      [(Def name _) (Def name (env-ref env name))])))
+      [(Def name _) (Def name (match (env-ref env name)
+                                ['cycle (Error "cyclic definition")]
+                                ['unbound (error "unreachable")]
+                                [(? Expr? e) e]))])))
 (module+ test
 
   ; variable lookup looks in defs
@@ -330,12 +336,12 @@
                       (Def 'b (Lit 123))
                       (Def 'c (Lit 123))))
 
-  ; variable lookup into error def is that error
+  ; variable lookup into error def is a different error
   (check-equal? (eval-defs (list (Def 'a (Var 'c))
                                  (Def 'b (Var 'a))
                                  (Def 'c (Error "ow"))))
-                (list (Def 'a (Error "ow"))
-                      (Def 'b (Error "ow"))
+                (list (Def 'a (Error "relies on a bad definition: c"))
+                      (Def 'b (Error "relies on a bad definition: a"))
                       (Def 'c (Error "ow"))))
 
   ; cyclic definition is an error
