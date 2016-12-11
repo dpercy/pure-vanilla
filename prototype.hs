@@ -1,7 +1,6 @@
-{-# OPTIONS_GHC -Wall #-}
+{-# OPTIONS_GHC -W #-}
 {-# LANGUAGE TemplateHaskell, OverloadedLists, TypeFamilies #-}
--- TODO disable the warning about top-level type annotations;
--- it's really annoying with test cases
+
 
 import Test.QuickCheck
 import qualified Data.Map as Map
@@ -21,9 +20,15 @@ data Atom = Null
 
 instance Num Atom where
   fromInteger = Integer
+  (+) = undefined
+  (*) = undefined
+  (-) = undefined
+  abs = undefined
+  signum = undefined
 
 
 data Expr = Var String
+          | Global String
           | Lit Atom
           | Cons Expr Expr
           | Tag Expr Expr
@@ -35,10 +40,16 @@ data Expr = Var String
 
 instance IsList Expr where
   type Item Expr = Expr
-  fromListN _ exprs = foldr Cons (Lit Null) exprs
+  fromList exprs = foldr Cons (Lit Null) exprs
+  toList = undefined
 
 instance Num Expr where
   fromInteger = Lit . Integer
+  (+) = undefined
+  (*) = undefined
+  (-) = undefined
+  abs = undefined
+  signum = undefined
 
 data Context = Hole
              | Cons0 Context Expr
@@ -65,6 +76,7 @@ data Split = Value
            deriving (Eq, Show)
 split :: Expr -> Split
 split (Var x) = error ("tried to split an open term: " ++ x)
+split (Global x) = Split Hole (Global x)
 split (Lit _) = Value
 split (Cons h t) = splitHelper h t Cons0 Cons1 Value
 split (Tag k v) = splitHelper k v Tag0 Tag1 Value
@@ -91,7 +103,6 @@ splitHelper x y cleft cright ifvalue = case split x of
   Split c e -> Split (cleft c y) e
 
 
-prop_split_ex1 :: Bool
 prop_split_ex1 =
   split (Cons
          [7, 8]
@@ -104,7 +115,6 @@ prop_split_ex1 =
        (Cons0 Hole (Lit Null)))
       (App 1 2))
 
-prop_split_ex2 :: Bool
 prop_split_ex2 =
   split (App 1 2)
   == (Split Hole (App 1 2))
@@ -122,14 +132,6 @@ plug c v = case c of
   App1 x y -> App x (plug y v)
   If0 test consq alt -> If (plug test v) consq alt
 
--- TODO fix problem with substitution:
--- if we have both globals and named function parameters,
--- then substitution doesn't work!!!
--- example:
--- subst (func (x) e) with e=(func () global x) and get (func (x) (func () local x))
--- Is it enough to have a separate form for globals?
--- I think so, because then function parameters don't capture a (Global "x") form.
--- 
 prop_substShadow =
   (subst (App (Func ["x", "z"] [Var "x", Var "y", Var "z"])
           [Var "x", Var "y", Var "z"])
@@ -151,6 +153,7 @@ step expr = case split expr of
 -- stepRoot assumes there is a redex at the root of the expr tree.
 stepRoot :: Expr -> Expr
 stepRoot (Var x) = Error ("unbound variable: " ++ x)
+stepRoot (Global x) = Error ("unbound global: " ++ x)
 stepRoot (App (Func params body) args) = case zipArgs params args of
                                           Right pairs -> subst body (Map.fromList pairs)
                                           Left err -> Error err
@@ -176,6 +179,7 @@ subst :: Expr -> Map String Expr -> Expr
 subst (Var x) env = case Map.lookup x env of
                      Nothing -> Var x
                      Just e -> e
+subst (Global x) _ = Global x
 subst (Lit v) _ = Lit v
 subst (Cons hd tl) env = Cons (subst hd env) (subst tl env)
 subst (Tag k v) env = Tag (subst k env) (subst v env)
@@ -203,6 +207,10 @@ prop_evalExprClosure =
              [3]))
   == (Func ["y"]
       [3, Var "y"])
+
+
+-- TODO add a separate form for globals, then add evalDefs.
+
  
 -- scary quickCheck macros!
 -- see haskell docs for quickCheckAll
