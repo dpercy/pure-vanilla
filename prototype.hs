@@ -52,7 +52,7 @@ data Split = Value
            | Split Context Expr
            deriving (Eq, Show)
 split :: Expr -> Split
-split (Var x) = Split Hole (Var x)
+split (Var x) = error ("tried to split an open term: " ++ x)
 split (Lit _) = Value
 split (Cons h t) = splitHelper h t Cons0 Cons1 Value
 split (Tag k v) = splitHelper k v Tag0 Tag1 Value
@@ -83,20 +83,17 @@ prop_split_ex1 :: Bool
 prop_split_ex1 =
   split (Cons
          (Cons (Lit (Integer 7)) (Lit (Integer 8)))
-         (Cons (Var "x") (Lit Null)))
+         (Cons
+          (App (Lit (Integer 1)) (Lit (Integer 2)))
+          (Lit Null)))
   == (Split
       (Cons1
        (Cons (Lit (Integer 7)) (Lit (Integer 8)))
        (Cons0 Hole (Lit Null)))
-      (Var "x"))
+      (App (Lit (Integer 1)) (Lit (Integer 2))))
 
 prop_split_ex2 :: Bool
 prop_split_ex2 =
-  split (App (Lit (Integer 1)) (Lit (Integer 2)))
-  == (Split Hole (App (Lit (Integer 1)) (Lit (Integer 2))))
-
-prop_split_ex3 :: Bool
-prop_split_ex3 =
   split (App (Lit (Integer 1)) (Lit (Integer 2)))
   == (Split Hole (App (Lit (Integer 1)) (Lit (Integer 2))))
 
@@ -168,11 +165,11 @@ subst (Error msg) _ = Error msg
 -- I think so, because then function parameters don't capture a (Global "x") form.
 -- 
 prop_substShadow =
-  (subst (App (Func ["x", "y"] (Cons (Var "x") (Cons (Var "y") (Var "z"))))
-         (Cons (Var "x") (Cons (Var "y") (Var "z"))))
-   Map.fromList [ ("x", ())
-   )
-   == 
+  (subst (App (Func ["x", "z"] (Cons (Var "x") (Cons (Var "y") (Var "z"))))
+          (Cons (Var "x") (Cons (Var "y") (Var "z"))))
+   (Map.fromList [ ("x", (Var "a")), ("y", (Var "b")) ]))
+   == (App (Func ["x", "z"] (Cons (Var "x") (Cons (Var "b") (Var "z"))))
+       (Cons (Var "a") (Cons (Var "b") (Var "z"))))
 
 
 -- scary quickCheck macros!
