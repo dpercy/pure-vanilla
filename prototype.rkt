@@ -76,6 +76,8 @@
 
 (define (non-symbol? x)
   (not (symbol? x)))
+(define (non-Error? x)
+  (not (Error? x)))
 
 (: hash-remove* (All (K V) (-> (HashTable K V) (Listof K) (HashTable K V))))
 (define (hash-remove* h keys)
@@ -136,8 +138,8 @@
                                              (Lit '())))))
                      (list (Lit 1) (Lit 2)))))
 
-(define-type Env (HashTable Symbol (Promise Expr)))
-(define (env-ref [env : Env] [name : Symbol]) : (U 'unbound 'cycle Expr)
+(define-type Env (HashTable Symbol (Promise (U Error Value))))
+(define (env-ref [env : Env] [name : Symbol]) : (U 'unbound 'cycle Error Value)
   (define (exn-fail-promise? exn)
     (match exn
       [(exn:fail (regexp "^force: reentrant promise") _) #true]
@@ -151,38 +153,37 @@
   (check-equal? (env-ref (hash 'x (delay (Lit 123)))
                          'x)
                 (Lit 123))
-  (check-equal? (env-ref (hash 'x (letrec ([p : (Promise Expr) (delay (force p))])
+  (check-equal? (env-ref (hash 'x (letrec ([p : (Promise Value) (delay (force p))])
                                     p))
                          'x)
                 'cycle))
 
 (define empty-env : Env (hash))
 
-(: eval-expr (->* (Expr) (Env) Expr))
+(: eval-expr (->* (Expr) (Env) (U Error Value)))
 (define (eval-expr expr [env empty-env])
   (match expr
     [(Var name) (match (env-ref env name)
                   ['unbound (Error "unbound variable")]
                   ['cycle (Error "cyclic definition")]
                   [(? Error?) (Error (format "relies on a bad definition: ~a" name))]
-                  [(? non-symbol? v)
-                   (ann v Expr)])]
+                  [(? non-symbol? (? non-Error? v)) (ann v Value)])]
     [(Lit value) expr]
     [(Prim name) expr]
     [(Tag key value) (match (eval-expr key env)
                        [(? Error? err) err]
                        [(and key* (Lit (? symbol?))) (match (eval-expr value env)
                                                        [(? Error? err) err]
-                                                       [value* (Tag key* value*)])]
+                                                       [(? non-Error? value*) (Tag key* value*)])]
                        [_ (Error "tag key must be a symbol")])]
     [(Cons head tail) (match (eval-expr head env)
                         [(? Error? err) err]
-                        [head*
+                        [(? non-Error? head*)
                          (match (eval-expr tail env)
                            [(? Error? err) err]
                            [(not (Lit '()) (Cons _ _))
                             (Error "cons onto non-list")]
-                           [tail*
+                           [(? non-Error? tail*)
                             (Cons head* tail*)])])]
     [(Func params body) expr]
     [(If test consq alt) (match (eval-expr test env)
@@ -193,14 +194,14 @@
     [(App func args) (match (eval-expr func env)
                        [(? Error? err) err]
                        [func*
-                        (let ([args* (let recur : (U Error (Listof Expr))
+                        (let ([args* (let recur : (U Error (Listof Value))
                                           ([args args])
                                           (match args
                                             ['() '()]
                                             [(cons a args)
                                              (match (eval-expr a env)
                                                [(? Error? err) err]
-                                               [a*
+                                               [(? non-Error? a*)
                                                 (match (recur args)
                                                   [(? Error? err) err]
                                                   [(? list? args*)
@@ -223,7 +224,7 @@
                                     (Error "arity mismatch"))]
                                [_ (Error "apply non-function")])]))])]
     [(? Error? err) err]))
-(define (apply-prim [name : PrimName] [args : (Listof Expr)]) : Expr
+(define (apply-prim [name : PrimName] [args : (Listof Value)]) : (U Error Value)
   (define-syntax-rule (arity n expr)
     (if (not (= n (length args)))
         (Error "arity mismatch")
@@ -406,14 +407,14 @@
   ;;
   )
 
-(define (eval-defs [defs : (Listof (Def Expr))]) : (Listof (Def Expr))
+(define (eval-defs [defs : (Listof (Def Expr))]) : (Listof (Def (U Error Value)))
   ; 1. create a cyclic env where every name is bound to a promise
   (define env : Env (for/hash : Env ([def defs])
                       (match def
                         [(Def name value)
                          (values name (delay (eval-expr value env)))])))
   ; 2. force all the promises
-  (for/list : (Listof (Def Expr)) ([def defs])
+  (for/list ([def defs])
     (match def
       [(Def name _) (Def name (match (env-ref env name)
                                 ['cycle (Error "cyclic definition")]
