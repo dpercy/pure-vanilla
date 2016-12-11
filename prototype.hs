@@ -1,11 +1,12 @@
 {-# OPTIONS_GHC -Wall #-}
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TemplateHaskell, OverloadedLists, TypeFamilies #-}
 -- TODO disable the warning about top-level type annotations;
 -- it's really annoying with test cases
 
 import Test.QuickCheck
 import qualified Data.Map as Map
 import Data.Map (Map)
+import GHC.Exts
 
 
 data Def e = Def String e
@@ -18,6 +19,10 @@ data Atom = Null
           | Symbol String
           deriving (Eq, Show)
 
+instance Num Atom where
+  fromInteger = Integer
+
+
 data Expr = Var String
           | Lit Atom
           | Cons Expr Expr
@@ -27,6 +32,13 @@ data Expr = Var String
           | If Expr Expr Expr
           | Error String
           deriving (Eq, Show)
+
+instance IsList Expr where
+  type Item Expr = Expr
+  fromListN _ exprs = foldr Cons (Lit Null) exprs
+
+instance Num Expr where
+  fromInteger = Lit . Integer
 
 data Context = Hole
              | Cons0 Context Expr
@@ -82,20 +94,20 @@ splitHelper x y cleft cright ifvalue = case split x of
 prop_split_ex1 :: Bool
 prop_split_ex1 =
   split (Cons
-         (Cons (Lit (Integer 7)) (Lit (Integer 8)))
+         [7, 8]
          (Cons
-          (App (Lit (Integer 1)) (Lit (Integer 2)))
+          (App 1 2)
           (Lit Null)))
   == (Split
       (Cons1
-       (Cons (Lit (Integer 7)) (Lit (Integer 8)))
+       [7, 8]
        (Cons0 Hole (Lit Null)))
-      (App (Lit (Integer 1)) (Lit (Integer 2))))
+      (App 1 2))
 
 prop_split_ex2 :: Bool
 prop_split_ex2 =
-  split (App (Lit (Integer 1)) (Lit (Integer 2)))
-  == (Split Hole (App (Lit (Integer 1)) (Lit (Integer 2))))
+  split (App 1 2)
+  == (Split Hole (App 1 2))
 
 
 
@@ -109,6 +121,22 @@ plug c v = case c of
   App0 x y -> App (plug x v) y
   App1 x y -> App x (plug y v)
   If0 test consq alt -> If (plug test v) consq alt
+
+-- TODO fix problem with substitution:
+-- if we have both globals and named function parameters,
+-- then substitution doesn't work!!!
+-- example:
+-- subst (func (x) e) with e=(func () global x) and get (func (x) (func () local x))
+-- Is it enough to have a separate form for globals?
+-- I think so, because then function parameters don't capture a (Global "x") form.
+-- 
+prop_substShadow =
+  (subst (App (Func ["x", "z"] [Var "x", Var "y", Var "z"])
+          [Var "x", Var "y", Var "z"])
+   (Map.fromList [ ("x", (Var "a")), ("y", (Var "b")) ]))
+   == (App (Func ["x", "z"] [Var "x", Var "b", Var "z"])
+       [Var "a", Var "b", Var "z"])
+
 
 
 data Step = Done
@@ -156,22 +184,26 @@ subst (App f a) env = App (subst f env) (subst a env)
 subst (If t c a) env = If (subst t env) (subst c env) (subst a env)
 subst (Error msg) _ = Error msg
 
--- TODO fix problem with substitution:
--- if we have both globals and named function parameters,
--- then substitution doesn't work!!!
--- example:
--- subst (func (x) e) with e=(func () global x) and get (func (x) (func () local x))
--- Is it enough to have a separate form for globals?
--- I think so, because then function parameters don't capture a (Global "x") form.
--- 
-prop_substShadow =
-  (subst (App (Func ["x", "z"] (Cons (Var "x") (Cons (Var "y") (Var "z"))))
-          (Cons (Var "x") (Cons (Var "y") (Var "z"))))
-   (Map.fromList [ ("x", (Var "a")), ("y", (Var "b")) ]))
-   == (App (Func ["x", "z"] (Cons (Var "x") (Cons (Var "b") (Var "z"))))
-       (Cons (Var "a") (Cons (Var "b") (Var "z"))))
 
+evalExpr :: Expr -> Expr
+evalExpr e = case step e of
+  Done -> e
+  Next e' -> evalExpr e'
 
+prop_evalExprExample =
+  (evalExpr (App (Func ["x", "y", "z"]
+                  [Var "x", Var "z", Var "y"])
+             [0, 1, 2]))
+  == [0, 2, 1]
+
+prop_evalExprClosure =
+  (evalExpr (App (Func ["x"]
+                  (Func ["y"]
+                   [Var "x", Var "y"]))
+             [3]))
+  == (Func ["y"]
+      [3, Var "y"])
+ 
 -- scary quickCheck macros!
 -- see haskell docs for quickCheckAll
 return []
