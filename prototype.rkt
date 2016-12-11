@@ -9,37 +9,19 @@
 ; Errors are also a special case of expressions.
 ; So evaluation can just consume and produce expressions.
 
-(struct Expr () #:transparent)
+(struct (E) Def ([name : Symbol]
+                 [value : E]) #:transparent)
 
-(struct Def ([name : Symbol]
-             [value : Expr]) #:transparent)
+(struct Var ([name : Symbol]) #:transparent)
 
-(struct Var Expr ([name : Symbol]) #:transparent)
+(struct Lit ([value : (U Boolean
+                         String
+                         Symbol
+                         Number
+                         Null
+                         )]) #:transparent)
 
-(struct Lit Expr ([value : (U Boolean
-                              String
-                              Symbol
-                              Number
-                              Null
-                              )]) #:transparent)
-
-(struct Cons Expr ([head : Expr]
-                   [tail : Expr]) #:transparent)
-
-(struct Tag Expr ([key : Expr]
-                  [value : Expr]) #:transparent)
-
-(struct Func Expr ([params : (Listof Symbol)]
-                   [body : Expr]) #:transparent)
-
-(struct App Expr ([func : Expr]
-                  [args : (Listof Expr)]) #:transparent)
-
-(struct If Expr ([test : Expr]
-                 [consq : Expr]
-                 [alt : Expr]) #:transparent)
-
-(struct Prim Expr ([name : PrimName]) #:transparent)
+(struct Prim ([name : PrimName]) #:transparent)
 (define-type PrimName
   (U 'empty?
      'cons?
@@ -49,14 +31,51 @@
      'tagged?
      ))
 
-; TODO many many more primitives - subsume cons?
-; - cons is different from first in that it's a constructor
-; - cons is more like lit than like first/rest/plus, etc
+(struct (E) Cons ([head : E]
+                  [tail : E]) #:transparent)
+
+(struct (E) Tag ([key : E]
+                 [value : E]) #:transparent)
+
+(struct (E) Func ([params : (Listof Symbol)]
+                  [body : E]) #:transparent)
+
+(struct (E) App ([func : E]
+                 [args : (Listof E)]) #:transparent)
+
+(struct (E) If ([test : E]
+                [consq : E]
+                [alt : E]) #:transparent)
+
+(struct Error ([msg : String]) #:transparent)
 
 
-; For now errors have a statically fixed message - it's not an expression.
-(struct Error Expr ([msg : String]) #:transparent)
+(define-type Expr
+  (U Var
+     Lit
+     Prim
+     (Cons Expr)
+     (Tag Expr)
+     (Func Expr)
+     (App Expr)
+     (If Expr)
+     Error
+     ))
 
+(define-type Value
+  (U Lit
+     Prim
+     (Cons Value)
+     (Tag Value)
+     ; the function body can be any expression;
+     ; the function itself is still a value.
+     (Func Expr)
+     ; app and if are never values.
+     ; error is definitely not a value.
+     ))
+
+(define (non-symbol? x)
+  (not (symbol? x)))
 
 (: hash-remove* (All (K V) (-> (HashTable K V) (Listof K) (HashTable K V))))
 (define (hash-remove* h keys)
@@ -77,7 +96,7 @@
     [(Func params body)  (Func params
                                (subst body (hash-remove* vars params)))]
     [(App func args)  (App (subst func vars)
-                           (for/list ([a args])
+                           (for/list : (Listof Expr) ([a args])
                              (subst a vars)))]
     [(If test consq alt) (If (subst test vars)
                              (subst consq vars)
@@ -146,7 +165,8 @@
                   ['unbound (Error "unbound variable")]
                   ['cycle (Error "cyclic definition")]
                   [(? Error?) (Error (format "relies on a bad definition: ~a" name))]
-                  [(? Expr? v) v])]
+                  [(? non-symbol? v)
+                   (ann v Expr)])]
     [(Lit value) expr]
     [(Prim name) expr]
     [(Tag key value) (match (eval-expr key env)
@@ -386,19 +406,19 @@
   ;;
   )
 
-(define (eval-defs [defs : (Listof Def)]) : (Listof Def)
+(define (eval-defs [defs : (Listof (Def Expr))]) : (Listof (Def Expr))
   ; 1. create a cyclic env where every name is bound to a promise
   (define env : Env (for/hash : Env ([def defs])
                       (match def
                         [(Def name value)
                          (values name (delay (eval-expr value env)))])))
   ; 2. force all the promises
-  (for/list ([def defs])
+  (for/list : (Listof (Def Expr)) ([def defs])
     (match def
       [(Def name _) (Def name (match (env-ref env name)
                                 ['cycle (Error "cyclic definition")]
                                 ['unbound (error "unreachable")]
-                                [(? Expr? e) e]))])))
+                                [(? non-symbol? e) e]))])))
 (module+ test
 
   ; variable lookup looks in defs
