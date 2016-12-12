@@ -28,6 +28,7 @@ instance Num Atom where
   signum = undefined
 
 
+-- TODO add primitives
 data Expr = Var String
           | Global String
           | Lit Atom
@@ -310,6 +311,7 @@ checkSteps stepper cases =
         (\(a, b) -> stepper a == Next b)
         (zip cases (tail cases))))
   && stepper (last cases) == Done
+  && (transitiveClosure stepper (head cases)) == last cases
 
 prop_evalEmpty = evalDefs [] == []
 prop_evalEasy = checkSteps stepDefs [
@@ -341,7 +343,19 @@ prop_evalCycle = checkSteps stepDefs [
  [ Def "x" (Error "cyclic definition: x") , Def "y" (Global "x")],
  [ Def "x" (Error "cyclic definition: x") , Def "y" (Error "depends on a failed def: x")]
  ]
-  
+
+-- Programs where a Global is under a function parameter with the same name
+-- are tricky, because there isn't a nice way to represent them using s-expressions.
+-- And a non-tricky program can step to a tricky one:
+prop_evalShadowGlobal =
+  stepDefs [ Def "x" (Lit $ Integer 7)
+           , Def "y" (App
+                      (Func ["v"] (Func ["x"] (Var "v")))
+                      [(Func [] (Global "x"))])
+           ]
+  == Next [ Def "x" (Lit $ Integer 7)
+          , Def "y" (Func ["x"] (Func [] (Global "x")))
+          ]
 
 
  
