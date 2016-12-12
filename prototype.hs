@@ -6,10 +6,11 @@ import Test.QuickCheck
 import qualified Data.Map as Map
 import Data.Map (Map)
 import GHC.Exts
+import Data.List (find)
 
 
-data Def e = Def String e
-           deriving (Eq, Show)
+data Def = Def String Expr
+         deriving (Eq, Show)
 
 data Atom = Null
           | Bool Bool
@@ -141,9 +142,10 @@ prop_substShadow =
 
 
 
-data Step = Done
-          | Next Expr
-step :: Expr -> Step
+data Step e = Done
+            | Next e
+            deriving (Eq, Show)
+step :: Expr -> Step Expr
 step (Error _) = Done
 step expr = case split expr of
   Value -> Done
@@ -189,10 +191,13 @@ subst (If t c a) env = If (subst t env) (subst c env) (subst a env)
 subst (Error msg) _ = Error msg
 
 
-evalExpr :: Expr -> Expr
-evalExpr e = case step e of
+transitiveClosure :: (a -> Step a) -> a -> a
+transitiveClosure f e = case f e of
   Done -> e
-  Next e' -> evalExpr e'
+  Next e' -> transitiveClosure f e'
+
+evalExpr :: Expr -> Expr
+evalExpr = transitiveClosure step
 
 prop_evalExprExample =
   (evalExpr (App (Func ["x", "y", "z"]
@@ -209,7 +214,135 @@ prop_evalExprClosure =
       [3, Var "y"])
 
 
--- TODO add a separate form for globals, then add evalDefs.
+-- A definition is done when it is a Value or an Error.
+-- Something like (App (Error _) (Lit Null)) is not done, because the error
+-- still needs to propagate up to the top level.
+isDefDone :: Def -> Bool
+isDefDone (Def _ (Error _)) = True
+isDefDone (Def _ expr) = case split expr of
+  Value -> True
+  Crash _ -> False
+  Split _ _ -> False
+  
+
+stepDefs :: [Def] -> Step [Def]
+stepDefs defs = case findActiveDef defs of
+  AllDone -> Done
+  Cycle name -> Next $ updateDef name (Error $ "cyclic definition: " ++ name) defs
+  OneActive name -> case lookupDef name defs of
+    Nothing -> error "unreachable - name in a OneActive must be in the defs"
+    Just expr ->
+      case split expr of
+       Value -> error "unreachable - active def can't be a value"
+       --Crash msg -> updateDef name (Error msg)
+       Split c (Global g) -> case lookupDef g defs of
+                              Nothing -> Next $ updateDef name (plug c (Error $ "depends on a missing def: " ++ g)) defs
+                              Just (Error _) -> Next $ updateDef name (plug c (Error $ "depends on a failed def: " ++ g)) defs
+                              Just e -> Next $ updateDef name (plug c e) defs
+       Split _ _ -> continue 
+       Crash _   -> continue
+      where continue = case step expr of
+                        Done -> error "unreachable - split and crash can step"
+                        Next e -> Next $ updateDef name e defs
+    
+{-    
+
+- find the first non-done def (by splitting each one), split it
+  - if it's blocked on another global, either:
+    - if that def is done, the global is the redex
+    - if that def is not done, focus on it in the search for the active def.
+- step the active def
+  - if the redex was a global, plug in the value or some error
+  - otherwise use stepRoot
+
+If all the defs are done then there is no active def; returns Nothing.
+
+-}
+
+lookupDef :: String -> [Def] -> Maybe Expr
+lookupDef name defs = lookup name $ map (\(Def n e) -> (n, e)) defs
+
+updateDef :: String -> Expr -> [Def] -> [Def]
+updateDef name newExpr defs = map f defs
+  where f (Def n e) = if n == name
+                      then (Def n newExpr)
+                      else (Def n e)
+
+data WhichActiveDef = AllDone
+                    | OneActive String
+                    | Cycle String
+                    deriving (Eq, Show)
+
+findActiveDef :: [Def] -> WhichActiveDef
+findActiveDef defs = case find (not . isDefDone) defs of
+  Nothing -> AllDone
+  Just def -> recur def []
+    where recur :: Def -> [String] -> WhichActiveDef
+          recur (Def name expr) blocked =
+            if name `elem` blocked
+            then Cycle name
+            else
+              case split expr of
+               Value -> error "unreachable - this def satisfied (not . isDefDone)"
+               -- A def that is about to crash is active and has no dependencies on other defs.
+               Crash _ -> OneActive name
+               -- If this def's active expr is a global, then it depends on another def.
+               -- Look up that def and check whether it's done.
+               -- If it is done, this def is the active one (the global is the redex).
+               -- If it's not done, continue the search at that def.
+               Split _ (Global g) -> case lookupDef g defs of
+                 Nothing -> OneActive name -- missing other def means global steps to error
+                 Just otherDefExpr ->
+                   let otherDef = (Def g otherDefExpr) in
+                   if isDefDone otherDef
+                   then OneActive name
+                   else recur otherDef (name:blocked)
+               -- If the redex in this def is not a global, this is the active def.
+               Split _ _ -> OneActive name
+
+
+evalDefs :: [Def] -> [Def]
+evalDefs = transitiveClosure stepDefs
+
+checkSteps :: Eq a => (a -> Step a) -> [a] -> Bool
+checkSteps stepper cases =
+  (and (map
+        (\(a, b) -> stepper a == Next b)
+        (zip cases (tail cases))))
+  && stepper (last cases) == Done
+
+prop_evalEmpty = evalDefs [] == []
+prop_evalEasy = checkSteps stepDefs [
+  [ Def "x" (App (Global "z") [42])
+  , Def "y" (Global "x")
+  , Def "z" (If (Lit $ Bool True) (Func ["a"] [Var "a"]) 456)
+  ],
+  [ Def "x" (App (Global "z") [42])
+  , Def "y" (Global "x")
+  , Def "z" (Func ["a"] [Var "a"])
+  ],
+  [ Def "x" (App (Func ["a"] [Var "a"]) [42])
+  , Def "y" (Global "x")
+  , Def "z" (Func ["a"] [Var "a"])
+  ],
+  [ Def "x" [42]
+  , Def "y" (Global "x")
+  , Def "z" (Func ["a"] [Var "a"])
+  ],
+  [ Def "x" [42]
+  , Def "y" [42]
+  , Def "z" (Func ["a"] [Var "a"])
+  ]
+  ]
+
+prop_evalCycle = checkSteps stepDefs [
+ [ Def "x" (App (Global "y") [42]) , Def "y" (If (Lit $ Bool True) (Global "x") 456)],
+ [ Def "x" (App (Global "y") [42]) , Def "y" (Global "x")],
+ [ Def "x" (Error "cyclic definition: x") , Def "y" (Global "x")],
+ [ Def "x" (Error "cyclic definition: x") , Def "y" (Error "depends on a failed def: x")]
+ ]
+  
+
 
  
 -- scary quickCheck macros!
