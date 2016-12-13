@@ -40,6 +40,7 @@ data Expr = Var String
           | Global String
           | Prim PrimFunc
           | Lit Atom
+          | Perform Expr -- an arbitrary value can be an effect
           | Cons Expr Expr
           | Tag Expr Expr
           | Func [String] Expr
@@ -117,6 +118,7 @@ instance Num Expr where
   signum = error "Num Expr signum"
 
 data Context = Hole
+             | Perform0 Context
              | Cons0 Context Expr
              | Cons1 Expr Context
              | Tag0 Context Expr
@@ -144,6 +146,10 @@ split (Var x) = error ("tried to split an open term: " ++ x)
 split (Global x) = Split Hole (Global x)
 split (Prim _) = Value
 split (Lit _) = Value
+split (Perform eff) = case split eff of
+  Value -> Split Hole (Perform eff)
+  Crash msg -> Crash msg
+  Split ctx e -> Split (Perform0 ctx) e
 split (Cons h t) = splitHelper h t Cons0 Cons1 Value
 split (Tag k v) = splitHelper k v Tag0 Tag1 Value
 split (Func _ _) = Value
@@ -216,6 +222,8 @@ step (Error _) = Done
 step expr = case split expr of
   Value -> Done
   Crash msg -> Next (Error msg)
+  Split c (Perform e) -> Yield c (Perform e)
+  -- TODO simply yield globals?
   Split c e -> Next (plug c (stepRoot e))
 
 -- stepRoot assumes there is a redex at the root of the expr tree.
@@ -223,6 +231,7 @@ stepRoot :: Expr -> Expr
 stepRoot (Var x) = Error ("unbound variable: " ++ x)
 stepRoot (Global x) = Error ("unbound global: " ++ x)
 stepRoot (Prim _) = error "not a redex"
+stepRoot (Perform _) = error "stepRoot can't handle Perform"
 stepRoot (App (Prim op) args) = case parseExprList args of
                                  Nothing -> Error "args must be a list"
                                  Just args -> applyPrim op args
@@ -437,6 +446,12 @@ prop_evenOdd = lookupDef "result" (evalDefs
   , Def "result" (App (Global "isEven") [5])
   ])
   == Just (Lit $ Bool False)
+
+
+
+prop_stepYield_ex1 =
+  step (Cons 1 (Perform 2))
+  == Yield (Cons1 1 Hole) (Perform 2)
 
 
 runtimeStep :: [Def] -> Expr -> Step Context Expr
