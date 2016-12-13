@@ -37,6 +37,7 @@ instance Num Atom where
 -- and variables aren't values; they're holes waiting for a value to be plugged in.
 data Expr = Var String
           | Global String
+          | Prim PrimFunc
           | Lit Atom
           | Cons Expr Expr
           | Tag Expr Expr
@@ -47,10 +48,54 @@ data Expr = Var String
           deriving (Eq, Show)
 
 
+data PrimFunc = OpIsEmpty
+              | OpIsCons
+              | OpFirst
+              | OpRest
+              | OpIsTagged
+              | OpUntag
+              deriving (Eq, Show)
+
+unop :: (Expr -> Expr) -> [Expr] -> Expr
+unop f [a] = f a
+unop _ [] = Error "not enough args"
+unop _ _ = Error "too many args"
+
+binop :: (Expr -> Expr -> Expr) -> [Expr] -> Expr
+binop f [a,b] = f a b
+binop _ [] = Error "not enough args"
+binop _ [_] = Error "not enough args"
+binop _ _ = Error "too many args"
+
+applyPrim :: PrimFunc -> [Expr] -> Expr
+applyPrim OpIsEmpty  = unop $ \v -> Lit $ Bool $ case v of Lit Null -> True ; _ -> False
+applyPrim OpIsCons   = unop $ \v -> Lit $ Bool $ case v of Cons _ _ -> True ; _ -> False
+applyPrim OpFirst    = unop $ \v -> case v of Cons a _ -> a ; _ -> Error "first non-cons"
+applyPrim OpRest     = unop $ \v -> case v of Cons _ b -> b ; _ -> Error "rest non-cons"
+applyPrim OpIsTagged = binop $ \k t -> Lit $ Bool $ case t of Tag k' _ -> k == k' ; _ -> False
+applyPrim OpUntag    = binop $ \k t -> case k of
+                                        Lit (Symbol s) ->
+                                          case t of
+                                           Tag (Lit (Symbol s')) v ->
+                                             if s == s'
+                                             then v
+                                             else Error "untag key mismatch"
+                                           _ -> Error "untag arg must be a tagged value"
+                                        _ -> Error "untag key must be a symbol"
+
+
+
 instance IsList Expr where
   type Item Expr = Expr
   fromList exprs = foldr Cons (Lit Null) exprs
-  toList = undefined
+  toList expr = case parseExprList expr of
+    Nothing -> error "toList of a non list"
+    Just exprs -> exprs
+
+parseExprList :: Expr -> Maybe [Expr]
+parseExprList (Lit Null) = Just []
+parseExprList (Cons hd tl) = Just (hd:(toList tl))
+parseExprList _ = Nothing
 
 instance Num Expr where
   fromInteger = Lit . Integer
@@ -86,6 +131,7 @@ data Split = Value
 split :: Expr -> Split
 split (Var x) = error ("tried to split an open term: " ++ x)
 split (Global x) = Split Hole (Global x)
+split (Prim _) = Value
 split (Lit _) = Value
 split (Cons h t) = splitHelper h t Cons0 Cons1 Value
 split (Tag k v) = splitHelper k v Tag0 Tag1 Value
@@ -164,6 +210,10 @@ step expr = case split expr of
 stepRoot :: Expr -> Expr
 stepRoot (Var x) = Error ("unbound variable: " ++ x)
 stepRoot (Global x) = Error ("unbound global: " ++ x)
+stepRoot (Prim _) = error "not a redex"
+stepRoot (App (Prim op) args) = case parseExprList args of
+                                 Nothing -> Error "args must be a list"
+                                 Just args -> applyPrim op args
 stepRoot (App (Func params body) args) = case zipArgs params args of
                                           Right pairs -> subst body (Map.fromList pairs)
                                           Left err -> Error err
@@ -190,6 +240,7 @@ subst (Var x) env = case Map.lookup x env of
                      Nothing -> Var x
                      Just e -> e
 subst (Global x) _ = Global x
+subst (Prim op) _ = Prim op
 subst (Lit v) _ = Lit v
 subst (Cons hd tl) env = Cons (subst hd env) (subst tl env)
 subst (Tag k v) env = Tag (subst k env) (subst v env)
