@@ -313,8 +313,8 @@ stepDefs defs = case findActiveDef defs of
     Next e -> Next $ updateDef name e defs
     Yield c _ -> Next $ updateDef name (plug c (Error "unhandled effect at import time")) defs
 
-  
-{-    
+
+{-
 
 - find the first non-done def (by splitting each one), split it
   - if it's blocked on another global, either:
@@ -459,14 +459,14 @@ runtimeStep :: [Def] -> Expr -> Step Context Expr
 -- share code with step ??
 --- pass a list of globals into step, so it can dereference globals
 -- TODO simplify globals code by treating globals like a yield?
-runtimeStep defs expr = 
+runtimeStep defs expr =
   case split expr of
      Split c (Global g) -> Next $ plug c $ case lookupDef g defs of
                                             Nothing -> Error $ "depends on a missing def: " ++ g
                                             Just (Error _) -> Error $ "depends on a failed def: " ++ g
                                             Just e -> e
      _ -> step expr
-    
+
 
 {-
 runMain takes:
@@ -494,7 +494,7 @@ testHandler _ = return $ Error "testHandler can't handle this effect"
 prop_runMain_ex1 =
   runWriter (runMain [ Def "main" (Func [] (Perform (Lit $ String "hi"))) ] testHandler)
   == ((Lit $ Symbol "ok"), "hi")
-            
+
 
 
 -- scary quickCheck macros!
