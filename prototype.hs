@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -W #-}
 {-# LANGUAGE TemplateHaskell, OverloadedLists, TypeFamilies, FlexibleContexts, EmptyCase #-}
-
+module Prototype where
 
 import Test.QuickCheck
 import qualified Data.Map as Map
@@ -483,7 +483,7 @@ runMain defs handler = case lookupDef "main" $ evalDefs defs of
             Next e -> loop e
             Yield c e -> do
               e' <- handler e
-              return $ plug c e'
+              loop $ plug c e'
 
 testHandler :: Expr -> Writer String Expr
 testHandler (Perform (Lit (String s))) = do
