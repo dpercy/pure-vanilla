@@ -21,11 +21,11 @@ data Atom = Null
 
 instance Num Atom where
   fromInteger = Integer
-  (+) = undefined
-  (*) = undefined
-  (-) = undefined
-  abs = undefined
-  signum = undefined
+  (+) = error "Num Atom (+)"
+  (*) = error "Num Atom (*)"
+  (-) = error "Num Atom (-)"
+  abs = error "Num Atom abs"
+  signum = error "Num Atom signum"
 
 
 -- TODO add primitives
@@ -54,6 +54,8 @@ data PrimFunc = OpIsEmpty
               | OpRest
               | OpIsTagged
               | OpUntag
+              | OpPlus
+              | OpLessThan
               deriving (Eq, Show)
 
 unop :: (Expr -> Expr) -> [Expr] -> Expr
@@ -83,6 +85,13 @@ applyPrim OpUntag    = binop $ \k t -> case k of
                                            _ -> Error "untag arg must be a tagged value"
                                         _ -> Error "untag key must be a symbol"
 
+applyPrim OpPlus = binop $ \x y -> case (x, y) of
+  ((Lit (Integer x)), (Lit (Integer y))) -> Lit (Integer (x + y))
+  _ -> Error "plus a non-integer"
+applyPrim OpLessThan = binop $ \x y -> case (x, y) of
+  ((Lit (Integer x)), (Lit (Integer y))) -> Lit (Bool (x < y))
+  _ -> Error "less-than a non-integer"
+
 
 
 instance IsList Expr where
@@ -99,11 +108,12 @@ parseExprList _ = Nothing
 
 instance Num Expr where
   fromInteger = Lit . Integer
-  (+) = undefined
-  (*) = undefined
-  (-) = undefined
-  abs = undefined
-  signum = undefined
+  (+) = error "Num Expr (+)"
+  (*) = error "Num Expr (*)"
+  (-) (Lit (Integer x)) (Lit (Integer y)) = (Lit (Integer (x - y)))
+  (-) _ _ = error "subtraction on non-number expr"
+  abs = error "Num Expr abs"
+  signum = error "Num Expr signum"
 
 data Context = Hole
              | Cons0 Context Expr
@@ -410,6 +420,20 @@ prop_evalShadowGlobal =
           , Def "y" (Func ["x"] (Func [] (Global "x")))
           ]
 
+prop_evalPrim =
+  stepDefs [ Def "x" (App (Prim OpPlus) [3, 4]) ]
+  == Next  [ Def "x" 7 ]
+
+prop_evenOdd = lookupDef "result" (evalDefs
+  [ Def "isEven" (Func ["n"] (If (App (Prim OpLessThan) [Var "n", 1])
+                              (Lit $ Bool True)
+                              (App (Global "isOdd") [(App (Prim OpPlus) [-1, Var "n"])])))
+  , Def "isOdd" (Func ["n"] (If (App (Prim OpLessThan) [Var "n", 1])
+                             (Lit $ Bool False)
+                             (App (Global "isEven") [(App (Prim OpPlus) [-1, Var "n"])])))
+  , Def "result" (App (Global "isEven") [5])
+  ])
+  == Just (Lit $ Bool False)
 
  
 -- scary quickCheck macros!
