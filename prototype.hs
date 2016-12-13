@@ -1,5 +1,5 @@
 {-# OPTIONS_GHC -W #-}
-{-# LANGUAGE TemplateHaskell, OverloadedLists, TypeFamilies #-}
+{-# LANGUAGE TemplateHaskell, OverloadedLists, TypeFamilies, FlexibleContexts, EmptyCase #-}
 
 
 import Test.QuickCheck
@@ -8,6 +8,7 @@ import Data.Map (Map)
 import GHC.Exts
 import Data.List (find)
 import Data.Void
+import Control.Monad.Writer
 
 
 data Def = Def String Expr
@@ -29,13 +30,6 @@ instance Num Atom where
   signum = error "Num Atom signum"
 
 
--- TODO add primitives
----- can this be an environment thing?
----- basically, some preloaded "magic" defs that have raw evaluation rules
----- instead of a function body
--- and defs can shadow primitives
--- problem: (Global "+") can't be a value, because it's a variable,
--- and variables aren't values; they're holes waiting for a value to be plugged in.
 data Expr = Var String
           | Global String
           | Prim PrimFunc
@@ -196,6 +190,7 @@ prop_split_ex2 =
 plug :: Context -> Expr -> Expr
 plug c v = case c of
   Hole -> v
+  Perform0 eff -> Perform (plug eff v)
   Cons0 x y -> Cons (plug x v) y
   Cons1 x y -> Cons x (plug y v)
   Tag0 x y -> Tag (plug x v) y
@@ -224,6 +219,9 @@ step expr = case split expr of
   Crash msg -> Next (Error msg)
   Split c (Perform e) -> Yield c (Perform e)
   -- TODO simply yield globals?
+  ---- then try: make globals be values, and have App (Global) ... yield a (Global) lookup
+  ------ this way globals can be passed around
+  ---- then try: eliminate the Prim form and use globals
   Split c e -> Next (plug c (stepRoot e))
 
 -- stepRoot assumes there is a redex at the root of the expr tree.
@@ -263,6 +261,7 @@ subst (Var x) env = case Map.lookup x env of
 subst (Global x) _ = Global x
 subst (Prim op) _ = Prim op
 subst (Lit v) _ = Lit v
+subst (Perform eff) env = Perform (subst eff env)
 subst (Cons hd tl) env = Cons (subst hd env) (subst tl env)
 subst (Tag k v) env = Tag (subst k env) (subst v env)
 subst (Func p b) env = Func p (subst b (foldr Map.delete env p))
@@ -275,6 +274,7 @@ evalExpr :: Expr -> Expr
 evalExpr e = case step e of
   Done -> e
   Next e' -> evalExpr e'
+  Yield c _ -> evalExpr (plug c (Error "unhandled effect at import time"))
 
 prop_evalExprExample =
   (evalExpr (App (Func ["x", "y", "z"]
@@ -302,21 +302,18 @@ isDefDone (Def _ expr) = case split expr of
   Split _ _ -> False
 
 
+-- stepDefs steps a top-level set of definitions once.
+-- repeating stepDefs until it finishes
 stepDefs :: [Def] -> Step Void [Def]
 stepDefs defs = case findActiveDef defs of
   AllDone -> Done
   Cycle name -> Next $ updateDef name (Error $ "cyclic definition: " ++ name) defs
-  OneActive (Def name expr) -> 
-    case split expr of
-     Split c (Global g) -> Next $ updateDef name (plug c e) defs
-       where e = case lookupDef g defs of
-                  Nothing -> Error $ "depends on a missing def: " ++ g
-                  Just (Error _) -> Error $ "depends on a failed def: " ++ g
-                  Just e -> e
-     _ -> case step expr of
-           Done -> error "unreachable - split and crash can step"
-           Next e -> Next $ updateDef name e defs 
-    
+  OneActive (Def name expr) -> case runtimeStep defs expr of
+    Done -> error "unreachable - active def can't be a value"
+    Next e -> Next $ updateDef name e defs
+    Yield c _ -> Next $ updateDef name (plug c (Error "unhandled effect at import time")) defs
+
+  
 {-    
 
 - find the first non-done def (by splitting each one), split it
@@ -377,13 +374,15 @@ evalDefs :: [Def] -> [Def]
 evalDefs defs = case stepDefs defs of
   Done -> defs
   Next defs' -> evalDefs defs'
+  Yield void _ -> case void of
 
 checkSteps :: Eq e => (e -> Step Void e) -> [e] -> Bool
 checkSteps stepper cases =
   (and (map
         (\(a, b) -> case stepper a of
                      Done -> False
-                     Next b' -> b == b')
+                     Next b' -> b == b'
+                     Yield void _ -> case void of)
         (zip cases (tail cases))))
   && stepper (last cases) == Done
 
@@ -460,18 +459,42 @@ runtimeStep :: [Def] -> Expr -> Step Context Expr
 -- share code with step ??
 --- pass a list of globals into step, so it can dereference globals
 -- TODO simplify globals code by treating globals like a yield?
-runtimeStep = undefined
+runtimeStep defs expr = 
+  case split expr of
+     Split c (Global g) -> Next $ plug c $ case lookupDef g defs of
+                                            Nothing -> Error $ "depends on a missing def: " ++ g
+                                            Just (Error _) -> Error $ "depends on a failed def: " ++ g
+                                            Just e -> e
+     _ -> step expr
+    
 
-runMain :: [Def] -> IO ()
-runMain defs = case lookupDef "main" $ evalDefs defs of
+{-
+runMain takes:
+  - list of defs
+  - an effect handler (something that consumes a Yield, does an effect, and returns a new expr)
+And runs the computation, using the effect handler to handle any Yields that happen.
+-}
+runMain :: Monad m => [Def] -> (Expr -> m Expr) -> m Expr
+runMain defs handler = case lookupDef "main" $ evalDefs defs of
   Nothing -> fail "no main function defined"
-  Just mainFunc -> loop mainFunc where
-    loop mainFunc = case runtimeStep defs mainFunc of
-      Done -> return ()
-      Next e -> loop e
-      Yield c e -> error "TODO do the effect, then resume the computation"
+  Just mainFunc -> loop (App mainFunc [])
+    where loop mainFunc = case runtimeStep defs mainFunc of
+            Done -> return mainFunc
+            Next e -> loop e
+            Yield c e -> do
+              e' <- handler e
+              return $ plug c e'
 
+testHandler :: Expr -> Writer String Expr
+testHandler (Perform (Lit (String s))) = do
+  tell s
+  return (Lit $ Symbol "ok")
+testHandler _ = return $ Error "testHandler can't handle this effect"
 
+prop_runMain_ex1 =
+  runWriter (runMain [ Def "main" (Func [] (Perform (Lit $ String "hi"))) ] testHandler)
+  == ((Lit $ Symbol "ok"), "hi")
+            
 
 
 -- scary quickCheck macros!
