@@ -33,6 +33,8 @@ instance Num Atom where
 ---- basically, some preloaded "magic" defs that have raw evaluation rules
 ---- instead of a function body
 -- and defs can shadow primitives
+-- problem: (Global "+") can't be a value, because it's a variable,
+-- and variables aren't values; they're holes waiting for a value to be plugged in.
 data Expr = Var String
           | Global String
           | Lit Atom
@@ -43,6 +45,7 @@ data Expr = Var String
           | If Expr Expr Expr
           | Error String
           deriving (Eq, Show)
+
 
 instance IsList Expr where
   type Item Expr = Expr
@@ -228,27 +231,22 @@ isDefDone (Def _ expr) = case split expr of
   Value -> True
   Crash _ -> False
   Split _ _ -> False
-  
+
 
 stepDefs :: [Def] -> Step [Def]
 stepDefs defs = case findActiveDef defs of
   AllDone -> Done
   Cycle name -> Next $ updateDef name (Error $ "cyclic definition: " ++ name) defs
-  OneActive name -> case lookupDef name defs of
-    Nothing -> error "unreachable - name in a OneActive must be in the defs"
-    Just expr ->
-      case split expr of
-       Value -> error "unreachable - active def can't be a value"
-       --Crash msg -> updateDef name (Error msg)
-       Split c (Global g) -> case lookupDef g defs of
-                              Nothing -> Next $ updateDef name (plug c (Error $ "depends on a missing def: " ++ g)) defs
-                              Just (Error _) -> Next $ updateDef name (plug c (Error $ "depends on a failed def: " ++ g)) defs
-                              Just e -> Next $ updateDef name (plug c e) defs
-       Split _ _ -> continue 
-       Crash _   -> continue
-      where continue = case step expr of
-                        Done -> error "unreachable - split and crash can step"
-                        Next e -> Next $ updateDef name e defs
+  OneActive (Def name expr) -> 
+    case split expr of
+     Split c (Global g) -> Next $ updateDef name (plug c e) defs
+       where e = case lookupDef g defs of
+                  Nothing -> Error $ "depends on a missing def: " ++ g
+                  Just (Error _) -> Error $ "depends on a failed def: " ++ g
+                  Just e -> e
+     _ -> case step expr of
+           Done -> error "unreachable - split and crash can step"
+           Next e -> Next $ updateDef name e defs 
     
 {-    
 
@@ -274,7 +272,7 @@ updateDef name newExpr defs = map f defs
                       else (Def n e)
 
 data WhichActiveDef = AllDone
-                    | OneActive String
+                    | OneActive Def
                     | Cycle String
                     deriving (Eq, Show)
 
@@ -290,20 +288,20 @@ findActiveDef defs = case find (not . isDefDone) defs of
               case split expr of
                Value -> error "unreachable - this def satisfied (not . isDefDone)"
                -- A def that is about to crash is active and has no dependencies on other defs.
-               Crash _ -> OneActive name
+               Crash _ -> OneActive (Def name expr)
                -- If this def's active expr is a global, then it depends on another def.
                -- Look up that def and check whether it's done.
                -- If it is done, this def is the active one (the global is the redex).
                -- If it's not done, continue the search at that def.
                Split _ (Global g) -> case lookupDef g defs of
-                 Nothing -> OneActive name -- missing other def means global steps to error
+                 Nothing -> OneActive (Def name expr) -- missing other def means global steps to error
                  Just otherDefExpr ->
                    let otherDef = (Def g otherDefExpr) in
                    if isDefDone otherDef
-                   then OneActive name
+                   then OneActive (Def name expr)
                    else recur otherDef (name:blocked)
                -- If the redex in this def is not a global, this is the active def.
-               Split _ _ -> OneActive name
+               Split _ _ -> OneActive (Def name expr)
 
 
 evalDefs :: [Def] -> [Def]
