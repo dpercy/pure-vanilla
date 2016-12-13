@@ -31,48 +31,74 @@
      'tagged?
      ))
 
-(struct (E) Cons ([head : E]
-                  [tail : E]) #:transparent)
+(struct (H T) Cons ([head : H]
+                    [tail : T]) #:transparent)
 
-(struct (E) Tag ([key : E]
-                 [value : E]) #:transparent)
+(struct (K V) Tag ([key : K]
+                   [value : V]) #:transparent)
 
 (struct (E) Func ([params : (Listof Symbol)]
                   [body : E]) #:transparent)
 
-(struct (E) App ([func : E]
-                 [args : (Listof E)]) #:transparent)
+(struct (F A) App ([func : F]
+                   [args : A]) #:transparent)
 
-(struct (E) If ([test : E]
-                [consq : E]
-                [alt : E]) #:transparent)
+(struct (T C A) If ([test : T]
+                    [consq : C]
+                    [alt : A]) #:transparent)
 
 (struct Error ([msg : String]) #:transparent)
+
+(struct Hole () #:transparent)
 
 
 (define-type Expr
   (U Var
      Lit
      Prim
-     (Cons Expr)
-     (Tag Expr)
+     (Cons Expr Expr)
+     (Tag Expr Expr)
      (Func Expr)
-     (App Expr)
-     (If Expr)
+     (App Expr (Listof Expr))
+     (If Expr Expr Expr)
      Error
      ))
 
 (define-type Value
   (U Lit
      Prim
-     (Cons Value)
-     (Tag Value)
+     (Cons Value Value)
+     (Tag Value Value)
      ; the function body can be any expression;
      ; the function itself is still a value.
      (Func Expr)
      ; app and if are never values.
      ; error is definitely not a value.
      ))
+
+(define-type Context
+  (U (Cons Context Expr)
+     (Cons Value Context)
+     (Tag Context Expr)
+     (Tag Value Context)
+     ; TODO App is tricky because of the arguments.
+     (App Context (Listof Expr))
+     (App Value (Listof (U Context Expr))) ; TODO make this more precise
+     (If Context Expr Expr)
+     ; There is no other case for If because it steps immediately to consq or alt.
+     ))
+
+(define (plug [c : (U Context Expr)] [e : Expr]) : Expr
+  (match c
+    [(Hole) e]
+    [(Cons h t) (Cons (plug h e)
+                      (plug t e))]
+    [(Tag k v) (Cons (plug k e)
+                     (plug v e))]
+    [(App f args) (Cons (plug f e)
+                        (for/list ([a args])
+                          (plug a e)))]
+    [(If t c a) (If (plug t e) c a)]))
 
 (define (non-symbol? x)
   (not (symbol? x)))
