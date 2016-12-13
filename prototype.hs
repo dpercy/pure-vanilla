@@ -29,6 +29,10 @@ instance Num Atom where
 
 
 -- TODO add primitives
+---- can this be an environment thing?
+---- basically, some preloaded "magic" defs that have raw evaluation rules
+---- instead of a function body
+-- and defs can shadow primitives
 data Expr = Var String
           | Global String
           | Lit Atom
