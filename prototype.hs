@@ -7,6 +7,7 @@ import qualified Data.Map as Map
 import Data.Map (Map)
 import GHC.Exts
 import Data.List (find)
+import Data.Void
 
 
 data Def = Def String Expr
@@ -206,10 +207,11 @@ prop_substShadow =
 
 
 
-data Step e = Done
-            | Next e
-            deriving (Eq, Show)
-step :: Expr -> Step Expr
+data Step c e = Done
+              | Next e
+              | Yield c e
+              deriving (Eq, Show)
+step :: Expr -> Step Context Expr
 step (Error _) = Done
 step expr = case split expr of
   Value -> Done
@@ -260,13 +262,10 @@ subst (If t c a) env = If (subst t env) (subst c env) (subst a env)
 subst (Error msg) _ = Error msg
 
 
-transitiveClosure :: (a -> Step a) -> a -> a
-transitiveClosure f e = case f e of
-  Done -> e
-  Next e' -> transitiveClosure f e'
-
 evalExpr :: Expr -> Expr
-evalExpr = transitiveClosure step
+evalExpr e = case step e of
+  Done -> e
+  Next e' -> evalExpr e'
 
 prop_evalExprExample =
   (evalExpr (App (Func ["x", "y", "z"]
@@ -294,7 +293,7 @@ isDefDone (Def _ expr) = case split expr of
   Split _ _ -> False
 
 
-stepDefs :: [Def] -> Step [Def]
+stepDefs :: [Def] -> Step Void [Def]
 stepDefs defs = case findActiveDef defs of
   AllDone -> Done
   Cycle name -> Next $ updateDef name (Error $ "cyclic definition: " ++ name) defs
@@ -366,15 +365,19 @@ findActiveDef defs = case find (not . isDefDone) defs of
 
 
 evalDefs :: [Def] -> [Def]
-evalDefs = transitiveClosure stepDefs
+evalDefs defs = case stepDefs defs of
+  Done -> defs
+  Next defs' -> evalDefs defs'
 
-checkSteps :: Eq a => (a -> Step a) -> [a] -> Bool
+checkSteps :: Eq e => (e -> Step Void e) -> [e] -> Bool
 checkSteps stepper cases =
   (and (map
-        (\(a, b) -> stepper a == Next b)
+        (\(a, b) -> case stepper a of
+                     Done -> False
+                     Next b' -> b == b')
         (zip cases (tail cases))))
   && stepper (last cases) == Done
-  && (transitiveClosure stepper (head cases)) == last cases
+
 
 prop_evalEmpty = evalDefs [] == []
 prop_evalEasy = checkSteps stepDefs [
@@ -435,7 +438,27 @@ prop_evenOdd = lookupDef "result" (evalDefs
   ])
   == Just (Lit $ Bool False)
 
- 
+
+runtimeStep :: [Def] -> Expr -> Step Context Expr
+-- TODO
+-- share code with stepDefs ?
+-- share code with step ??
+--- pass a list of globals into step, so it can dereference globals
+-- TODO simplify globals code by treating globals like a yield?
+runtimeStep = undefined
+
+runMain :: [Def] -> IO ()
+runMain defs = case lookupDef "main" $ evalDefs defs of
+  Nothing -> fail "no main function defined"
+  Just mainFunc -> loop mainFunc where
+    loop mainFunc = case runtimeStep defs mainFunc of
+      Done -> return ()
+      Next e -> loop e
+      Yield c e -> error "TODO do the effect, then resume the computation"
+
+
+
+
 -- scary quickCheck macros!
 -- see haskell docs for quickCheckAll
 return []
