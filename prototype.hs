@@ -218,10 +218,6 @@ step expr = case split expr of
   Value -> Done
   Crash msg -> Next (Error msg)
   Split c (Perform e) -> Yield c (Perform e)
-  -- TODO simply yield globals?
-  ---- then try: make globals be values, and have App (Global) ... yield a (Global) lookup
-  ------ this way globals can be passed around
-  ---- then try: eliminate the Prim form and use globals
   Split c e -> Next (plug c (stepRoot e))
 
 -- stepRoot assumes there is a redex at the root of the expr tree.
@@ -303,12 +299,11 @@ isDefDone (Def _ expr) = case split expr of
 
 
 -- stepDefs steps a top-level set of definitions once.
--- repeating stepDefs until it finishes
 stepDefs :: [Def] -> Step Void [Def]
 stepDefs defs = case findActiveDef defs of
   AllDone -> Done
   Cycle name -> Next $ updateDef name (Error $ "cyclic definition: " ++ name) defs
-  OneActive (Def name expr) -> case runtimeStep defs expr of
+  OneActive (Def name expr) -> case stepInDefs defs expr of
     Done -> error "unreachable - active def can't be a value"
     Next e -> Next $ updateDef name e defs
     Yield c _ -> Next $ updateDef name (plug c (Error "unhandled effect at import time")) defs
@@ -452,19 +447,17 @@ prop_stepYield_ex1 =
   step (Cons 1 (Perform 2))
   == Yield (Cons1 1 Hole) (Perform 2)
 
+stepGlobal :: [Def] -> Expr -> Expr
+stepGlobal defs (Global g) = case lookupDef g defs of
+  Nothing -> Error $ "depends on a missing def: " ++ g
+  Just (Error _) -> Error $ "depends on a failed def: " ++ g
+  Just e -> e
+stepGlobal _ _ = error "stepGlobal can only handle Global exprs"
 
-runtimeStep :: [Def] -> Expr -> Step Context Expr
--- TODO
--- share code with stepDefs ?
--- share code with step ??
---- pass a list of globals into step, so it can dereference globals
--- TODO simplify globals code by treating globals like a yield?
-runtimeStep defs expr =
+stepInDefs :: [Def] -> Expr -> Step Context Expr
+stepInDefs defs expr =
   case split expr of
-     Split c (Global g) -> Next $ plug c $ case lookupDef g defs of
-                                            Nothing -> Error $ "depends on a missing def: " ++ g
-                                            Just (Error _) -> Error $ "depends on a failed def: " ++ g
-                                            Just e -> e
+     Split c (Global g) -> Next $ plug c $ stepGlobal defs (Global g)
      _ -> step expr
 
 
@@ -478,7 +471,7 @@ runMain :: Monad m => [Def] -> (Expr -> m Expr) -> m Expr
 runMain defs handler = case lookupDef "main" $ evalDefs defs of
   Nothing -> fail "no main function defined"
   Just mainFunc -> loop (App mainFunc [])
-    where loop mainFunc = case runtimeStep defs mainFunc of
+    where loop mainFunc = case stepInDefs defs mainFunc of
             Done -> return mainFunc
             Next e -> loop e
             Yield c e -> do
