@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -W #-}
 {-# LANGUAGE TemplateHaskell, OverloadedLists, TypeFamilies, FlexibleContexts, EmptyCase #-}
-module Prototype where
+module VanillaCore where
 
 import Test.QuickCheck
 import qualified Data.Map as Map

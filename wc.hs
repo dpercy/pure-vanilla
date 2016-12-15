@@ -1,7 +1,7 @@
 #!/usr/bin/env runghc
 {-# OPTIONS_GHC -W #-}
 {-# LANGUAGE TemplateHaskell, OverloadedLists, TypeFamilies, FlexibleContexts, EmptyCase #-}
-import Prototype hiding (main)
+import VanillaCore hiding (main)
 
 import Data.Char (ord)
 import System.IO.Error (catchIOError)
