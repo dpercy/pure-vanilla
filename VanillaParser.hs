@@ -4,7 +4,7 @@ module VanillaParser where
 
 import VanillaCore hiding (main)
 import Test.QuickCheck
-import Text.Parsec
+import Text.Parsec hiding (token)
 import Control.Monad
 import Data.Functor.Identity
 
@@ -30,18 +30,26 @@ let iden = expr0 in expr1  -- sugar for ((iden) -> expr1)(expr0)
 
 type Parser = ParsecT [Char] () Identity
 
+token :: Parser a -> Parser a
+token p = do
+  v <- p
+  spaces
+  return v
+
 program :: Parser [Def]
-program = sepBy def (char ';')
+program = do
+  spaces
+  sepBy def (token $ char ';')
 
 def :: Parser Def
 def = do
   lhs <- iden
-  char '='
+  token $ char '='
   rhs <- expr
   return $ Def lhs rhs
 
 iden :: Parser String
-iden = do
+iden = token $ do
   hd <- letter
   tl <- many (letter <|> digit)
   return $ hd:tl
@@ -51,7 +59,7 @@ expr = (Var `liftM` iden)
        <|> literal
 
 literal :: Parser Expr
-literal = (Lit . Integer . read) `liftM` many1 digit
+literal = token $ (Lit . Integer . read) `liftM` many1 digit
 
 
 
@@ -59,7 +67,7 @@ prop_empty =
   parse program "<in>" "" == Right []
   
 prop_example =
-  parse program "<in>" "x = 1 ; y = 2"
+  parse program "<in>" " x = 1 ; y = 2 "
    == Right [ Def "x" (Lit $ Integer 1)
             , Def "y" (Lit $ Integer 2)
             ]
