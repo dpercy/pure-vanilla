@@ -13,6 +13,12 @@ import qualified Data.Set as Set
 
 {-
 
+Design principles for syntax:
+- each punctuation should have 1 meaning
+- use conventional notation where possible
+- support auto-indentation
+  - consequence: indentation must not be significant, but newlines can be.
+
 program := def ; ...
 def := id = expr
 
