@@ -3,10 +3,13 @@
 module VanillaParser where
 
 import VanillaCore hiding (main)
+
 import Test.QuickCheck
 import Text.Parsec hiding (token)
 import Control.Monad
 import Data.Functor.Identity
+import qualified Data.Map as Map
+import qualified Data.Set as Set
 
 {-
 
@@ -24,17 +27,15 @@ expr ( expr , ... )   -- function call
 
 let iden = expr0 in expr1  -- sugar for ((iden) -> expr1)(expr0)
 
+special functions:
+- perform
+- tag
+- cons
 
 
 -}
 
 type Parser = ParsecT [Char] () Identity
-
-{-
-TODO distinguish ast parsers from token parsers:
-don't have to use Parsec's GenTokenParser thing,
-but instead just define tok_id etc.
--}
 
 token :: Parser a -> Parser a
 token p = do
@@ -44,38 +45,71 @@ token p = do
 
 tok_equals = token $ char '='
 tok_id = token $ many1 letter -- TODO digit, underscore...
-tok_op = token $ many1 (oneOf "~!@#$%^&*-=+|\\:<>/?")
+tok_sym = token $ char ':' >> many1 letter
+tok_op = token $ many1 (oneOf "~!@#$%^&*-=+|\\<>/?")
 tok_semicolon = token $ char ';'
 tok_openParen = token $ char '('
 tok_closeParen = token $ char ')'
 tok_comma = token $ char ','
 tok_arrow = token $ string "->"
+tok_int = token $ read `liftM` many1 digit
 parens = between tok_openParen tok_closeParen
 
 program :: Parser [Def]
 program = do
   spaces
-  sepBy def tok_semicolon
+  defs <- def `sepBy` tok_semicolon -- TODO allow newlines instead
+  eof
+  return defs
 
 def :: Parser Def
 def = do
-  lhs <- tok_id
+  lhs <- variable
   tok_equals
   rhs <- expr
-  return $ Def lhs rhs
+  return $ Def lhs (freeVarsToGlobals rhs)
+
+freeVarsToGlobals :: Expr -> Expr
+freeVarsToGlobals e =
+  let frees = Set.toList $ freeVars e in
+  let s = Map.fromList $ map (\v -> (v, (Global v))) frees in
+  subst e s
+
+variable :: Parser String
+variable = try $ do
+  v <- tok_id
+  guard (not $ v `elem` keywords)
+  return v
+
+keyword :: String -> Parser String
+keyword kw = try $ do
+  v <- tok_id
+  guard (v == kw)
+  return v
+
+keywords :: [String]
+keywords = [ "let", "in", "if", "then", "else" ]
+
 
 expr :: Parser Expr
 expr = do
   primary <- (literal
-              <|> Var `liftM` tok_id
+              <|> Var `liftM` variable
               <|> lambda
               <|> try (Var `liftM` parens tok_op)
               <|> prefixOp
-              <|> parens expr)
+              <|> parens expr
+              <|> letExpr
+              <|> ifExpr)
   call primary <|> infixOp primary <|> return primary
 
 literal :: Parser Expr
-literal = token $ (Lit . Integer . read) `liftM` many1 digit
+literal = num <|> sym
+  where num = do n <- tok_int
+                 return (Lit $ Integer n)
+        sym = do s <- tok_sym
+                 return (Lit $ Symbol s)
+          
 
 lambda :: Parser Expr
 lambda = do p <- try $ do p <- params
@@ -84,51 +118,85 @@ lambda = do p <- try $ do p <- params
             e <- expr
             return $ Func p e
     where params = parens (param `sepBy` tok_comma)
-          param = tok_id <|> tok_op
+          param = variable <|> tok_op
 
 call :: Expr -> Parser Expr
 call callee = do args <- parens (expr `sepBy` tok_comma)
-                 return $ App callee (foldr Cons (Lit Null) args)
+                 return $ case callee of
+                           Var op -> app op args
+                           _ -> App callee (foldr Cons (Lit Null) args)
 
 prefixOp :: Parser Expr
 prefixOp = do op <- tok_op
               arg <- expr
-              return $ App (Var op) [arg]
+              return $ app op [arg]
 
 infixOp arg0 = do op <- tok_op
                   arg1 <- expr
-                  return $ App (Var op) [arg0, arg1]
+                  return $ app op [arg0, arg1]
 
+letExpr :: Parser Expr
+letExpr = do keyword "let"
+             v <- variable
+             tok_equals
+             e <- expr
+             keyword "in"
+             b <- expr
+             return $ (App (Func [v] b) [e])
 
+-- since the else part is mandatory,
+-- there should be no ambiguity when nesting ifs.
+ifExpr :: Parser Expr
+ifExpr = do keyword "if"
+            t <- expr
+            keyword "then"
+            c <- expr
+            keyword "else"
+            e <- expr
+            return $ If t c e
+
+app :: String -> [Expr] -> Expr
+app "perform" [e] = Perform e
+app "cons" [x, y] = Cons x y
+app "tag" [x, y] = Tag x y
+app "+" [x, y] = App (Prim OpPlus) [x, y]
+app "<" [x, y] = App (Prim OpLessThan) [x, y]
+-- TODO more cases for more ops
+app f a = App (Var f) (foldr Cons (Lit Null) a)
+
+pp :: String -> [Def]
 pp s = case parse program "<in>" s of
   Left err -> error $ show err
   Right v -> v
+
+parseProgram = pp
+
 
 prop_empty =
   pp "" == []
   
 prop_example =
-  pp " x = 1 ; y = 2 "
-   == [ Def "x" (Lit $ Integer 1)
-      , Def "y" (Lit $ Integer 2)
+  pp " x = 1 ; y = :wut "
+   == [ Def "x" 1
+      , Def "y" (Lit $ Symbol "wut")
       ]
 
 prop_func =
-  pp "f = () -> 1"
-  == [ Def "f" (Func [] (Lit $ Integer 1)) ]
+  pp "v = (x) -> cons(x, y)"
+  == [ Def "v" (Func ["x"] (Cons (Var "x") (Global "y"))) ]
 
 prop_params =
   pp "f = (x, y, ++) -> 1"
-  == [ Def "f" (Func ["x", "y", "++"] (Lit $ Integer 1)) ]
+  == [ Def "f" (Func ["x", "y", "++"] 1) ]
 
 prop_call =
   pp "v = f(x, 1)"
-  == [ Def "v" (App (Var "f") [(Var "x"), (Lit $ Integer 1)]) ]
+  == [ Def "v" (App (Global "f") [(Global "x"), 1]) ]
 
 prop_prefix =
   pp "f = () -> (- x)"
   == [  Def "f" (Func []
-                 (App (Var "-") [Var "x"]))
+                 (App (Global "-") [Global "x"]))
      ]
 
 prop_ops =
@@ -136,8 +204,26 @@ prop_ops =
   == [ Def "f" (Func ["++", "<|>"]
                 (App (Var "<|>")
                  [(App (Var "++")
-                   [(Lit $ Integer 1), (Lit $ Integer 2)])]))
+                   [1, 2])]))
      ]
+
+prop_letin =
+  pp "v = let x = 1 in (x + 2)"
+  == [ Def "v" (App (Func ["x"] (App (Prim OpPlus)
+                                 [Var "x", 2]))
+                [1]) ]
+
+prop_special_functions =
+  pp "f = perform(tag(1, cons(2, 3)))"
+  == [ Def "f" (Perform (Tag 1 (Cons 2 3))) ]
+
+prop_conditionals =
+  pp "v = if 1 then 2 else if 3 then 4 else 5"
+  == [ Def "v" (If 1 2 (If 3 4 5)) ]
+
+prop_prims =
+  pp "v = 1 < 2"
+  == [ Def "v" (App (Prim OpLessThan) [1, 2]) ]
 
 
 -- scary quickCheck macros!

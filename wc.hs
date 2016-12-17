@@ -2,31 +2,24 @@
 {-# OPTIONS_GHC -W #-}
 {-# LANGUAGE TemplateHaskell, OverloadedLists, TypeFamilies, FlexibleContexts, EmptyCase #-}
 import VanillaCore hiding (main)
+import VanillaParser hiding (main)
 
 import Data.Char (ord)
 import System.IO.Error (catchIOError)
 
+
 wc :: [Def]
-wc = [
-  -- wc: count the number of newlines
-  Def "main" (Func [] (Perform (Tag (Lit $ Symbol "write") (App (Global "loop") [0])))),
-  Def "loop"
-  (Func ["n"]
-   (App (Func ["c"]
-         (If (App (Prim OpLessThan) [Var "c", 0])
-          -- it's EOF
-          (Var "n")
-          (If (App (Prim OpLessThan) [Var "c", 10])
-           -- not a newline
-           (App (Global "loop") [Var "n"])
-           (If (App (Prim OpLessThan) [10, Var "c"])
-            -- also not a newline
-            (App (Global "loop") [Var "n"])
-            -- it's a newline
-            (App (Global "loop") [(App (Prim OpPlus)
-                                  [Var "n", 1])])))))
-    [(Perform (Lit (Symbol "read")))]))
-  
+wc = parseProgram $ unlines [
+  "main = () -> let v = loop(0) in perform(tag(:write, v));",
+  "loop = (n) ->",
+  "  let c = perform(:read) in",
+  "    if c < 0", -- negative means eof
+  "    then n",
+  "    else if c < 10",
+  "    then loop(n)",
+  "    else if 10 < c",
+  "    then loop(n)",
+  "    else loop(n + 1)"
   ]
 
 getOrd :: IO Integer

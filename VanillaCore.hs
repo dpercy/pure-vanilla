@@ -5,6 +5,8 @@ module VanillaCore where
 import Test.QuickCheck
 import qualified Data.Map as Map
 import Data.Map (Map)
+import qualified Data.Set as Set
+import Data.Set (Set)
 import GHC.Exts
 import Data.List (find)
 import Data.Void
@@ -264,6 +266,23 @@ subst (Func p b) env = Func p (subst b (foldr Map.delete env p))
 subst (App f a) env = App (subst f env) (subst a env)
 subst (If t c a) env = If (subst t env) (subst c env) (subst a env)
 subst (Error msg) _ = Error msg
+
+freeVars :: Expr -> Set String
+freeVars (Var v) = Set.fromList [v]
+freeVars (Global _) = Set.empty
+freeVars (Prim _) = Set.empty
+freeVars (Lit _) = Set.empty
+freeVars (Perform e) = freeVars e
+freeVars (Cons x y) = freeVars x `Set.union` freeVars y
+freeVars (Tag x y) = freeVars x `Set.union` freeVars y
+freeVars (Func p a) = Set.filter (`notElem` p) (freeVars a)
+freeVars (App x y) = freeVars x `Set.union` freeVars y
+freeVars (If x y z) = freeVars x `Set.union` freeVars y `Set.union` freeVars z
+freeVars (Error _) = Set.empty
+
+prop_freeVars_example =
+  freeVars (App (Func ["x", "y"] (Cons (Var "x") (Var "z"))) [Var "a"])
+  == Set.fromList ["a", "z"]
 
 
 evalExpr :: Expr -> Expr
