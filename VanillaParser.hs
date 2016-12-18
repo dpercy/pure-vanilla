@@ -5,7 +5,7 @@ module VanillaParser where
 import VanillaCore hiding (main)
 
 import Test.QuickCheck
-import Text.Parsec hiding (token, space, spaces)
+import Text.Parsec hiding (token, space, spaces, newline)
 import Control.Monad
 import Data.Functor.Identity
 import Data.Char
@@ -100,7 +100,7 @@ keywords = [ "let", "in", "if", "then", "else" ]
 
 
 expr :: Parser Expr
-expr = "expr" & do
+expr = "expression" & do
   primary <- (literal
               <|> Var `liftM` variable
               <|> lambda
@@ -110,6 +110,7 @@ expr = "expr" & do
               <|> letExpr
               <|> ifExpr)
   call primary <|> infixOp primary <|> return primary
+-- TODO resolve ambiguities like f = - 1 + 2
 
 literal :: Parser Expr
 literal = "literal" & (num <|> sym)
@@ -122,6 +123,7 @@ literal = "literal" & (num <|> sym)
 lambda :: Parser Expr
 lambda = do p <- try $ do p <- params
                           tok_arrow
+                          optional tok_newline
                           return p
             e <- expr
             -- Use the 'func' smart constructor to convert
@@ -150,19 +152,15 @@ letExpr = do keyword "let"
              v <- variable
              tok_equals
              e <- expr
-             keyword "in"
+             keyword "in" ; optional tok_newline
              b <- expr
              return $ (App (func [v] b) [e])
 
 -- since the else part is mandatory,
 -- there should be no ambiguity when nesting ifs.
 ifExpr :: Parser Expr
-ifExpr = do keyword "if"
-            t <- expr
-            keyword "then"
-            c <- expr
-            keyword "else"
-            e <- expr
+ifExpr = do keyword "if" ; t <- expr ; keyword "then" ; c <- expr ; optional tok_newline
+            keyword "else" ; e <- expr ; optional tok_newline
             return $ If t c e
 
 app :: String -> [Expr] -> Expr

@@ -11,13 +11,19 @@ import Str
 
 wc :: [Def]
 wc = parseProgram $ [str|
-  main = () -> let v = loop(0) in let ignored = perform(tag(:write, v)) in :ok;
+
+  main = () ->
+    let v = loop(0) in
+    let ignored = perform(tag(:write, v)) in
+    :ok
+
   loop = (n) ->
     let c = perform(:read) in
       if c < 0 then n
       else if c < 10 then loop(n)
       else if 10 < c then loop(n)
       else loop(n + 1)
+
   |]
 
 getOrd :: IO Integer
