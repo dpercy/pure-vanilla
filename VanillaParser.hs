@@ -5,9 +5,10 @@ module VanillaParser where
 import VanillaCore hiding (main)
 
 import Test.QuickCheck
-import Text.Parsec hiding (token)
+import Text.Parsec hiding (token, space, spaces)
 import Control.Monad
 import Data.Functor.Identity
+import Data.Char
 
 {-
 
@@ -41,6 +42,14 @@ special functions:
 
 type Parser = ParsecT [Char] () Identity
 
+space :: Parser Char
+space = satisfy (\c -> isSpace c && c /= '\n')
+
+spaces :: Parser ()
+spaces = skipMany space
+
+(&) = flip (<?>)
+
 token :: Parser a -> Parser a
 token p = do
   v <- p
@@ -52,6 +61,7 @@ tok_id = token $ many1 letter -- TODO digit, underscore...
 tok_sym = token $ char ':' >> many1 letter
 tok_op = token $ many1 (oneOf "~!@#$%^&*-=+|\\<>/?")
 tok_semicolon = token $ char ';'
+tok_newline = (many1 $ token $ char '\n') >> return '\n'
 tok_openParen = token $ char '('
 tok_closeParen = token $ char ')'
 tok_comma = token $ char ','
@@ -60,14 +70,14 @@ tok_int = token $ read `liftM` many1 digit
 parens = between tok_openParen tok_closeParen
 
 program :: Parser [Def]
-program = do
-  spaces
-  defs <- def `sepBy` tok_semicolon -- TODO allow newlines instead
+program = "program" & do
+  many (space <|> tok_newline)
+  defs <- def `sepEndBy` (tok_semicolon <|> tok_newline)
   eof
   return defs
 
 def :: Parser Def
-def = do
+def = "definition" & do
   lhs <- variable
   tok_equals
   rhs <- expr
@@ -90,7 +100,7 @@ keywords = [ "let", "in", "if", "then", "else" ]
 
 
 expr :: Parser Expr
-expr = do
+expr = "expr" & do
   primary <- (literal
               <|> Var `liftM` variable
               <|> lambda
@@ -102,7 +112,7 @@ expr = do
   call primary <|> infixOp primary <|> return primary
 
 literal :: Parser Expr
-literal = num <|> sym
+literal = "literal" & (num <|> sym)
   where num = do n <- tok_int
                  return (Lit $ Integer n)
         sym = do s <- tok_sym
@@ -117,11 +127,11 @@ lambda = do p <- try $ do p <- params
             -- Use the 'func' smart constructor to convert
             -- Vars to Uprefs (de bruijn indices)
             return $ func p e
-    where params = parens (param `sepBy` tok_comma)
+    where params = parens (param `sepEndBy` tok_comma)
           param = variable <|> tok_op
 
 call :: Expr -> Parser Expr
-call callee = do args <- parens (expr `sepBy` tok_comma)
+call callee = do args <- parens (expr `sepEndBy` tok_comma)
                  return $ case callee of
                            Var op -> app op args
                            _ -> App callee (foldr Cons (Lit Null) args)
@@ -180,6 +190,22 @@ prop_example =
    == [ Def "x" 1
       , Def "y" (Lit $ Symbol "wut")
       ]
+
+prop_newline =
+  pp "x=1\ny=2"
+  == [ Def "x" 1, Def "y" 2 ]
+prop_newlines =
+  pp "x=1\n\n\ny=2"
+  == [ Def "x" 1, Def "y" 2 ]
+prop_start_newlines =
+  pp "  \n   \n\n \n  x = 1"
+  == [Def "x" 1]
+prop_end_newlines =
+  pp "x=1     \n  \n  \n\n"
+  == [Def "x" 1]
+prop_only_newlines =
+  pp "   \n \n \n\n  "
+  == []
 
 prop_func =
   pp "v = (x) -> cons(x, y)"
