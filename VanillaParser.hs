@@ -8,8 +8,6 @@ import Test.QuickCheck
 import Text.Parsec hiding (token)
 import Control.Monad
 import Data.Functor.Identity
-import qualified Data.Map as Map
-import qualified Data.Set as Set
 
 {-
 
@@ -73,13 +71,7 @@ def = do
   lhs <- variable
   tok_equals
   rhs <- expr
-  return $ Def lhs (freeVarsToGlobals rhs)
-
-freeVarsToGlobals :: Expr -> Expr
-freeVarsToGlobals e =
-  let frees = Set.toList $ freeVars e in
-  let s = Map.fromList $ map (\v -> (v, (Global v))) frees in
-  subst e s
+  return $ Def lhs rhs
 
 variable :: Parser String
 variable = try $ do
@@ -122,7 +114,9 @@ lambda = do p <- try $ do p <- params
                           tok_arrow
                           return p
             e <- expr
-            return $ Func p e
+            -- Use the 'func' smart constructor to convert
+            -- Vars to Uprefs (de bruijn indices)
+            return $ func p e
     where params = parens (param `sepBy` tok_comma)
           param = variable <|> tok_op
 
@@ -148,7 +142,7 @@ letExpr = do keyword "let"
              e <- expr
              keyword "in"
              b <- expr
-             return $ (App (Func [v] b) [e])
+             return $ (App (func [v] b) [e])
 
 -- since the else part is mandatory,
 -- there should be no ambiguity when nesting ifs.
@@ -189,25 +183,25 @@ prop_example =
 
 prop_func =
   pp "v = (x) -> cons(x, y)"
-  == [ Def "v" (Func ["x"] (Cons (Var "x") (Global "y"))) ]
+  == [ Def "v" (func ["x"] (Cons (Var "x") (Var "y"))) ]
 
 prop_params =
   pp "f = (x, y, ++) -> 1"
-  == [ Def "f" (Func ["x", "y", "++"] 1) ]
+  == [ Def "f" (func ["x", "y", "++"] 1) ]
 
 prop_call =
   pp "v = f(x, 1)"
-  == [ Def "v" (App (Global "f") [(Global "x"), 1]) ]
+  == [ Def "v" (App (Var "f") [(Var "x"), 1]) ]
 
 prop_prefix =
   pp "f = () -> (- x)"
-  == [  Def "f" (Func []
-                 (App (Global "-") [Global "x"]))
+  == [  Def "f" (func []
+                 (App (Var "-") [Var "x"]))
      ]
 
 prop_ops =
   pp "f = (++, <|>) -> (<|> (1 ++ 2))"
-  == [ Def "f" (Func ["++", "<|>"]
+  == [ Def "f" (func ["++", "<|>"]
                 (App (Var "<|>")
                  [(App (Var "++")
                    [1, 2])]))
@@ -215,7 +209,7 @@ prop_ops =
 
 prop_letin =
   pp "v = let x = 1 in (x + 2)"
-  == [ Def "v" (App (Func ["x"] (App (Prim OpPlus)
+  == [ Def "v" (App (func ["x"] (App (Prim OpPlus)
                                  [Var "x", 2]))
                 [1]) ]
 
