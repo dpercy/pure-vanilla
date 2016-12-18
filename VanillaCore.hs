@@ -5,8 +5,6 @@ module VanillaCore where
 import Test.QuickCheck
 import qualified Data.Map as Map
 import Data.Map (Map)
-import qualified Data.Set as Set
-import Data.Set (Set)
 import GHC.Exts
 import Data.List (find)
 import Data.Void
@@ -32,7 +30,7 @@ instance Num Atom where
   signum = error "Num Atom signum"
 
 
-data Expr = Var String
+data Expr = Var Integer -- de bruijn index
           | Global String
           | Prim PrimFunc
           | Lit Atom
@@ -138,7 +136,7 @@ data Split = Value
            | Split Context Expr
            deriving (Eq, Show)
 split :: Expr -> Split
-split (Var x) = error ("tried to split an open term: " ++ x)
+split (Var _) = error "unreachable - split doesn't reach under binders"
 split (Global x) = Split Hole (Global x)
 split (Prim _) = Value
 split (Lit _) = Value
@@ -188,6 +186,38 @@ prop_split_ex2 =
   == (Split Hole (App 1 2))
 
 
+len :: [a] -> Integer
+len = toInteger . length
+
+-- convenience for writing functions without thinking about de bruijn indices.
+func :: [String] -> Expr -> Expr
+func ps body = Func ps (sub env body)
+  where env :: Map String Integer
+        env = Map.fromList (zip ps (reverse [0..(len ps)-1]))
+        sub _(Var i) = Var i
+        sub env (Global x) = case Map.lookup x env of
+                                Nothing -> Global x
+                                Just i -> Var i
+        sub _ (Prim op) = Prim op
+        sub _ (Lit v) = Lit v
+        sub env (Perform eff) = Perform (sub env eff)
+        sub env (Cons hd tl) = Cons (sub env hd) (sub env tl)
+        sub env (Tag k v) = Tag (sub env k) (sub env v)
+        sub env (Func ps body) = Func ps (sub (Map.map (+ (len ps)) env) body)
+        sub env (App f a) = App (sub env f) (sub env a)
+        sub env (If t c a) = If (sub env t) (sub env c) (sub env a)
+        sub _ (Error s) = Error s
+
+
+prop_func_example1 =
+  func ["x", "y"] [Global "x", Global "y", Global "z"]
+  == Func ["x", "y"] [Var 1, Var 0, Global "z"]
+
+prop_func_example2 =
+  func ["x"] (func ["y"] [Global "x", func ["x"] [Global "x", Global "y"]])
+  == Func ["x"] (Func ["y"] [Var 1, Func ["x"] [Var 0, Var 1]])
+
+
 
 plug :: Context -> Expr -> Expr
 plug c v = case c of
@@ -200,13 +230,6 @@ plug c v = case c of
   App0 x y -> App (plug x v) y
   App1 x y -> App x (plug y v)
   If0 test consq alt -> If (plug test v) consq alt
-
-prop_substShadow =
-  (subst (App (Func ["x", "z"] [Var "x", Var "y", Var "z"])
-          [Var "x", Var "y", Var "z"])
-   (Map.fromList [ ("x", (Var "a")), ("y", (Var "b")) ]))
-   == (App (Func ["x", "z"] [Var "x", Var "b", Var "z"])
-       [Var "a", Var "b", Var "z"])
 
 
 
@@ -224,24 +247,33 @@ step expr = case split expr of
 
 -- stepRoot assumes there is a redex at the root of the expr tree.
 stepRoot :: Expr -> Expr
-stepRoot (Var x) = Error ("unbound variable: " ++ x)
+stepRoot (Var _) = error "stepRoot can't handle up-refs"
 stepRoot (Global x) = Error ("unbound global: " ++ x)
 stepRoot (Prim _) = error "not a redex"
 stepRoot (Perform _) = error "stepRoot can't handle Perform"
 stepRoot (App (Prim op) args) = case parseExprList args of
                                  Nothing -> Error "args must be a list"
                                  Just args -> applyPrim op args
-stepRoot (App (Func params body) args) = case zipArgs params args of
-                                          Right pairs -> subst body (Map.fromList pairs)
-                                          Left err -> Error err
-  where zipArgs :: [String] -> Expr -> Either String [(String, Expr)]
-        zipArgs (p:ps) (Cons hd tl) = case zipArgs ps tl of
-                                       Left err -> Left err
-                                       Right rest -> Right ((p,hd):rest)
-        zipArgs [] (Lit Null) = Right []
-        zipArgs [] (Cons _ _) = Left "too many args"
-        zipArgs (_:_) (Lit Null) = Left "not enough args"
-        zipArgs _ _ = Left "args must be a list"
+stepRoot (App (Func params body) args) = case parseExprList args of
+  Nothing -> Error "args must be a list"
+  Just args -> if len params == len args
+               then sub startEnv body
+               else Error "arity"
+    where startEnv :: Map Integer Expr
+          startEnv = Map.fromList (zip (reverse [0..(len args)-1]) args)
+          sub env (Var i) = case Map.lookup i env of
+                          Nothing -> Var i
+                          Just expr -> expr
+          sub _ (Global x) = Global x
+          sub _ (Prim op) = Prim op
+          sub _ (Lit v) = Lit v
+          sub env (Perform eff) = Perform (sub env eff)
+          sub env (Cons hd tl) = Cons (sub env hd) (sub env tl)
+          sub env (Tag k v) = Tag (sub env k) (sub env v)
+          sub env (Func ps body) = Func ps (sub (Map.mapKeys (+ (len ps)) env) body)
+          sub env (App f a) = App (sub env f) (sub env a)
+          sub env (If t c a) = If (sub env t) (sub env c) (sub env a)
+          sub _ (Error s) = Error s
 stepRoot (App _ _) = Error "callee must be a function"
 stepRoot (If (Lit (Bool True)) c _) = c
 stepRoot (If (Lit (Bool False)) _ a) = a
@@ -252,39 +284,6 @@ stepRoot (Tag _ _) = error "not a redex"
 stepRoot (Func _ _) = error "not a redex"
 stepRoot (Error _) = error "not a redex"
 
-subst :: Expr -> Map String Expr -> Expr
-subst (Var x) env = case Map.lookup x env of
-                     Nothing -> Var x
-                     Just e -> e
-subst (Global x) _ = Global x
-subst (Prim op) _ = Prim op
-subst (Lit v) _ = Lit v
-subst (Perform eff) env = Perform (subst eff env)
-subst (Cons hd tl) env = Cons (subst hd env) (subst tl env)
-subst (Tag k v) env = Tag (subst k env) (subst v env)
-subst (Func p b) env = Func p (subst b (foldr Map.delete env p))
-subst (App f a) env = App (subst f env) (subst a env)
-subst (If t c a) env = If (subst t env) (subst c env) (subst a env)
-subst (Error msg) _ = Error msg
-
-freeVars :: Expr -> Set String
-freeVars (Var v) = Set.fromList [v]
-freeVars (Global _) = Set.empty
-freeVars (Prim _) = Set.empty
-freeVars (Lit _) = Set.empty
-freeVars (Perform e) = freeVars e
-freeVars (Cons x y) = freeVars x `Set.union` freeVars y
-freeVars (Tag x y) = freeVars x `Set.union` freeVars y
-freeVars (Func p a) = Set.filter (`notElem` p) (freeVars a)
-freeVars (App x y) = freeVars x `Set.union` freeVars y
-freeVars (If x y z) = freeVars x `Set.union` freeVars y `Set.union` freeVars z
-freeVars (Error _) = Set.empty
-
-prop_freeVars_example =
-  freeVars (App (Func ["x", "y"] (Cons (Var "x") (Var "z"))) [Var "a"])
-  == Set.fromList ["a", "z"]
-
-
 evalExpr :: Expr -> Expr
 evalExpr e = case step e of
   Done -> e
@@ -292,18 +291,15 @@ evalExpr e = case step e of
   Yield c _ -> evalExpr (plug c (Error "unhandled effect at import time"))
 
 prop_evalExprExample =
-  (evalExpr (App (Func ["x", "y", "z"]
-                  [Var "x", Var "z", Var "y"])
+  (evalExpr (App (func ["x", "y", "z"]
+                  [Global "x", Global "z", Global "y"])
              [0, 1, 2]))
   == [0, 2, 1]
 
 prop_evalExprClosure =
-  (evalExpr (App (Func ["x"]
-                  (Func ["y"]
-                   [Var "x", Var "y"]))
-             [3]))
-  == (Func ["y"]
-      [3, Var "y"])
+  (evalExpr (App (func ["x"] (func ["y"] [Global "x", Global "y"])) [3]))
+  == (func ["y"]
+      [3, Global "y"])
 
 
 -- A definition is done when it is a Value or an Error.
@@ -391,7 +387,8 @@ evalDefs defs = case stepDefs defs of
   Yield void _ -> case void of
 
 checkSteps :: Eq e => (e -> Step Void e) -> [e] -> Bool
-checkSteps stepper cases =
+checkSteps stepper cases = cases == (head cases):(trace stepper (head cases))
+{-
   (and (map
         (\(a, b) -> case stepper a of
                      Done -> False
@@ -399,29 +396,35 @@ checkSteps stepper cases =
                      Yield void _ -> case void of)
         (zip cases (tail cases))))
   && stepper (last cases) == Done
+-}
 
+trace stepper init =
+  case stepper init of
+   Done -> []
+   Next v -> v:(trace stepper v)
+   Yield c _ -> absurd c
 
 prop_evalEmpty = evalDefs [] == []
 prop_evalEasy = checkSteps stepDefs [
   [ Def "x" (App (Global "z") [42])
   , Def "y" (Global "x")
-  , Def "z" (If (Lit $ Bool True) (Func ["a"] [Var "a"]) 456)
+  , Def "z" (If (Lit $ Bool True) (func ["a"] [Global "a"]) 456)
   ],
   [ Def "x" (App (Global "z") [42])
   , Def "y" (Global "x")
-  , Def "z" (Func ["a"] [Var "a"])
+  , Def "z" (func ["a"] [Global "a"])
   ],
-  [ Def "x" (App (Func ["a"] [Var "a"]) [42])
+  [ Def "x" (App (func ["a"] [Global "a"]) [42])
   , Def "y" (Global "x")
-  , Def "z" (Func ["a"] [Var "a"])
+  , Def "z" (func ["a"] [Global "a"])
   ],
   [ Def "x" [42]
   , Def "y" (Global "x")
-  , Def "z" (Func ["a"] [Var "a"])
+  , Def "z" (func ["a"] [Global "a"])
   ],
   [ Def "x" [42]
   , Def "y" [42]
-  , Def "z" (Func ["a"] [Var "a"])
+  , Def "z" (func ["a"] [Global "a"])
   ]
   ]
 
@@ -438,10 +441,12 @@ prop_evalCycle = checkSteps stepDefs [
 prop_evalShadowGlobal =
   stepDefs [ Def "x" (Lit $ Integer 7)
            , Def "y" (App
-                      (Func ["v"] (Func ["x"] (Var "v")))
-                      [(Func [] (Global "x"))])
+                      (func ["v"] (func ["x"] (Global "v")))
+                      [(func [] (Global "x"))])
            ]
   == Next [ Def "x" (Lit $ Integer 7)
+            -- Note the capitalized Func constructor:
+            -- this Global "x" doesn't refer to the parameter "x".
           , Def "y" (Func ["x"] (Func [] (Global "x")))
           ]
 
@@ -450,12 +455,12 @@ prop_evalPrim =
   == Next  [ Def "x" 7 ]
 
 prop_evenOdd = lookupDef "result" (evalDefs
-  [ Def "isEven" (Func ["n"] (If (App (Prim OpLessThan) [Var "n", 1])
+  [ Def "isEven" (func ["n"] (If (App (Prim OpLessThan) [Global "n", 1])
                               (Lit $ Bool True)
-                              (App (Global "isOdd") [(App (Prim OpPlus) [-1, Var "n"])])))
-  , Def "isOdd" (Func ["n"] (If (App (Prim OpLessThan) [Var "n", 1])
+                              (App (Global "isOdd") [(App (Prim OpPlus) [-1, Global "n"])])))
+  , Def "isOdd" (func ["n"] (If (App (Prim OpLessThan) [Global "n", 1])
                              (Lit $ Bool False)
-                             (App (Global "isEven") [(App (Prim OpPlus) [-1, Var "n"])])))
+                             (App (Global "isEven") [(App (Prim OpPlus) [-1, Global "n"])])))
   , Def "result" (App (Global "isEven") [5])
   ])
   == Just (Lit $ Bool False)
