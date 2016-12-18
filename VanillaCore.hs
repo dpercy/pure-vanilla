@@ -30,8 +30,8 @@ instance Num Atom where
   signum = error "Num Atom signum"
 
 
-data Expr = Var Integer -- de bruijn index
-          | Global String
+data Expr = Upref Integer -- de bruijn index
+          | Var String
           | Prim PrimFunc
           | Lit Atom
           | Perform Expr -- an arbitrary value can be an effect
@@ -136,8 +136,8 @@ data Split = Value
            | Split Context Expr
            deriving (Eq, Show)
 split :: Expr -> Split
-split (Var _) = error "unreachable - split doesn't reach under binders"
-split (Global x) = Split Hole (Global x)
+split (Upref _) = error "unreachable - split doesn't reach under binders"
+split (Var x) = Split Hole (Var x)
 split (Prim _) = Value
 split (Lit _) = Value
 split (Perform eff) = case split eff of
@@ -194,10 +194,10 @@ func :: [String] -> Expr -> Expr
 func ps body = Func ps (sub env body)
   where env :: Map String Integer
         env = Map.fromList (zip ps (reverse [0..(len ps)-1]))
-        sub _(Var i) = Var i
-        sub env (Global x) = case Map.lookup x env of
-                                Nothing -> Global x
-                                Just i -> Var i
+        sub _(Upref i) = Upref i
+        sub env (Var x) = case Map.lookup x env of
+                                Nothing -> Var x
+                                Just i -> Upref i
         sub _ (Prim op) = Prim op
         sub _ (Lit v) = Lit v
         sub env (Perform eff) = Perform (sub env eff)
@@ -210,12 +210,12 @@ func ps body = Func ps (sub env body)
 
 
 prop_func_example1 =
-  func ["x", "y"] [Global "x", Global "y", Global "z"]
-  == Func ["x", "y"] [Var 1, Var 0, Global "z"]
+  func ["x", "y"] [Var "x", Var "y", Var "z"]
+  == Func ["x", "y"] [Upref 1, Upref 0, Var "z"]
 
 prop_func_example2 =
-  func ["x"] (func ["y"] [Global "x", func ["x"] [Global "x", Global "y"]])
-  == Func ["x"] (Func ["y"] [Var 1, Func ["x"] [Var 0, Var 1]])
+  func ["x"] (func ["y"] [Var "x", func ["x"] [Var "x", Var "y"]])
+  == Func ["x"] (Func ["y"] [Upref 1, Func ["x"] [Upref 0, Upref 1]])
 
 
 
@@ -247,8 +247,8 @@ step expr = case split expr of
 
 -- stepRoot assumes there is a redex at the root of the expr tree.
 stepRoot :: Expr -> Expr
-stepRoot (Var _) = error "stepRoot can't handle up-refs"
-stepRoot (Global x) = Error ("unbound global: " ++ x)
+stepRoot (Upref _) = error "stepRoot can't handle up-refs"
+stepRoot (Var x) = Error ("unbound global: " ++ x)
 stepRoot (Prim _) = error "not a redex"
 stepRoot (Perform _) = error "stepRoot can't handle Perform"
 stepRoot (App (Prim op) args) = case parseExprList args of
@@ -261,10 +261,10 @@ stepRoot (App (Func params body) args) = case parseExprList args of
                else Error "arity"
     where startEnv :: Map Integer Expr
           startEnv = Map.fromList (zip (reverse [0..(len args)-1]) args)
-          sub env (Var i) = case Map.lookup i env of
-                          Nothing -> Var i
+          sub env (Upref i) = case Map.lookup i env of
+                          Nothing -> Upref i
                           Just expr -> expr
-          sub _ (Global x) = Global x
+          sub _ (Var x) = Var x
           sub _ (Prim op) = Prim op
           sub _ (Lit v) = Lit v
           sub env (Perform eff) = Perform (sub env eff)
@@ -292,14 +292,14 @@ evalExpr e = case step e of
 
 prop_evalExprExample =
   (evalExpr (App (func ["x", "y", "z"]
-                  [Global "x", Global "z", Global "y"])
+                  [Var "x", Var "z", Var "y"])
              [0, 1, 2]))
   == [0, 2, 1]
 
 prop_evalExprClosure =
-  (evalExpr (App (func ["x"] (func ["y"] [Global "x", Global "y"])) [3]))
+  (evalExpr (App (func ["x"] (func ["y"] [Var "x", Var "y"])) [3]))
   == (func ["y"]
-      [3, Global "y"])
+      [3, Var "y"])
 
 
 -- A definition is done when it is a Value or an Error.
@@ -369,7 +369,7 @@ findActiveDef defs = case find (not . isDefDone) defs of
                -- Look up that def and check whether it's done.
                -- If it is done, this def is the active one (the global is the redex).
                -- If it's not done, continue the search at that def.
-               Split _ (Global g) -> case lookupDef g defs of
+               Split _ (Var g) -> case lookupDef g defs of
                  Nothing -> OneActive (Def name expr) -- missing other def means global steps to error
                  Just otherDefExpr ->
                    let otherDef = (Def g otherDefExpr) in
@@ -406,48 +406,49 @@ trace stepper init =
 
 prop_evalEmpty = evalDefs [] == []
 prop_evalEasy = checkSteps stepDefs [
-  [ Def "x" (App (Global "z") [42])
-  , Def "y" (Global "x")
-  , Def "z" (If (Lit $ Bool True) (func ["a"] [Global "a"]) 456)
+  [ Def "x" (App (Var "z") [42])
+  , Def "y" (Var "x")
+  , Def "z" (If (Lit $ Bool True) (func ["a"] [Var "a"]) 456)
   ],
-  [ Def "x" (App (Global "z") [42])
-  , Def "y" (Global "x")
-  , Def "z" (func ["a"] [Global "a"])
+  [ Def "x" (App (Var "z") [42])
+  , Def "y" (Var "x")
+  , Def "z" (func ["a"] [Var "a"])
   ],
-  [ Def "x" (App (func ["a"] [Global "a"]) [42])
-  , Def "y" (Global "x")
-  , Def "z" (func ["a"] [Global "a"])
+  [ Def "x" (App (func ["a"] [Var "a"]) [42])
+  , Def "y" (Var "x")
+  , Def "z" (func ["a"] [Var "a"])
   ],
   [ Def "x" [42]
-  , Def "y" (Global "x")
-  , Def "z" (func ["a"] [Global "a"])
+  , Def "y" (Var "x")
+  , Def "z" (func ["a"] [Var "a"])
   ],
   [ Def "x" [42]
   , Def "y" [42]
-  , Def "z" (func ["a"] [Global "a"])
+  , Def "z" (func ["a"] [Var "a"])
   ]
   ]
 
 prop_evalCycle = checkSteps stepDefs [
- [ Def "x" (App (Global "y") [42]) , Def "y" (If (Lit $ Bool True) (Global "x") 456)],
- [ Def "x" (App (Global "y") [42]) , Def "y" (Global "x")],
- [ Def "x" (Error "cyclic definition: x") , Def "y" (Global "x")],
+ [ Def "x" (App (Var "y") [42]) , Def "y" (If (Lit $ Bool True) (Var "x") 456)],
+ [ Def "x" (App (Var "y") [42]) , Def "y" (Var "x")],
+ [ Def "x" (Error "cyclic definition: x") , Def "y" (Var "x")],
  [ Def "x" (Error "cyclic definition: x") , Def "y" (Error "depends on a failed def: x")]
  ]
 
--- Programs where a Global is under a function parameter with the same name
+-- Programs where a global reference is under a function parameter with the same name
 -- are tricky, because there isn't a nice way to represent them using s-expressions.
--- And a non-tricky program can step to a tricky one:
-prop_evalShadowGlobal =
+-- We can't simply rule out this case at parse-time,
+-- because a non-tricky program can step to a tricky one:
+prop_evalShadowVar =
   stepDefs [ Def "x" (Lit $ Integer 7)
            , Def "y" (App
-                      (func ["v"] (func ["x"] (Global "v")))
-                      [(func [] (Global "x"))])
+                      (func ["v"] (func ["x"] (Var "v")))
+                      [(func [] (Var "x"))])
            ]
   == Next [ Def "x" (Lit $ Integer 7)
             -- Note the capitalized Func constructor:
-            -- this Global "x" doesn't refer to the parameter "x".
-          , Def "y" (Func ["x"] (Func [] (Global "x")))
+            -- this Var "x" doesn't refer to the parameter "x".
+          , Def "y" (Func ["x"] (Func [] (Var "x")))
           ]
 
 prop_evalPrim =
@@ -455,13 +456,13 @@ prop_evalPrim =
   == Next  [ Def "x" 7 ]
 
 prop_evenOdd = lookupDef "result" (evalDefs
-  [ Def "isEven" (func ["n"] (If (App (Prim OpLessThan) [Global "n", 1])
+  [ Def "isEven" (func ["n"] (If (App (Prim OpLessThan) [Var "n", 1])
                               (Lit $ Bool True)
-                              (App (Global "isOdd") [(App (Prim OpPlus) [-1, Global "n"])])))
-  , Def "isOdd" (func ["n"] (If (App (Prim OpLessThan) [Global "n", 1])
+                              (App (Var "isOdd") [(App (Prim OpPlus) [-1, Var "n"])])))
+  , Def "isOdd" (func ["n"] (If (App (Prim OpLessThan) [Var "n", 1])
                              (Lit $ Bool False)
-                             (App (Global "isEven") [(App (Prim OpPlus) [-1, Global "n"])])))
-  , Def "result" (App (Global "isEven") [5])
+                             (App (Var "isEven") [(App (Prim OpPlus) [-1, Var "n"])])))
+  , Def "result" (App (Var "isEven") [5])
   ])
   == Just (Lit $ Bool False)
 
@@ -471,17 +472,17 @@ prop_stepYield_ex1 =
   step (Cons 1 (Perform 2))
   == Yield (Cons1 1 Hole) (Perform 2)
 
-stepGlobal :: [Def] -> Expr -> Expr
-stepGlobal defs (Global g) = case lookupDef g defs of
+stepVar :: [Def] -> Expr -> Expr
+stepVar defs (Var g) = case lookupDef g defs of
   Nothing -> Error $ "depends on a missing def: " ++ g
   Just (Error _) -> Error $ "depends on a failed def: " ++ g
   Just e -> e
-stepGlobal _ _ = error "stepGlobal can only handle Global exprs"
+stepVar _ _ = error "stepVar can only handle Var exprs"
 
 stepInDefs :: [Def] -> Expr -> Step Context Expr
 stepInDefs defs expr =
   case split expr of
-     Split c (Global g) -> Next $ plug c $ stepGlobal defs (Global g)
+     Split c (Var g) -> Next $ plug c $ stepVar defs (Var g)
      _ -> step expr
 
 
