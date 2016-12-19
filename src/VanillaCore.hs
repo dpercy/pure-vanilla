@@ -493,15 +493,17 @@ runMain takes:
 And runs the computation, using the effect handler to handle any Yields that happen.
 -}
 runMain :: Monad m => [Def] -> (Expr -> m Expr) -> m Expr
-runMain defs handler = case lookupDef "main" $ evalDefs defs of
-  Nothing -> fail "no main function defined"
-  Just mainFunc -> loop (App mainFunc [])
-    where loop mainFunc = case stepInDefs defs mainFunc of
-            Done -> return mainFunc
-            Next e -> loop e
-            Yield c e -> do
-              e' <- handler e
-              loop $ plug c e'
+runMain defs handler = runInDefs defs (App (Var "main") []) handler
+
+runInDefs :: Monad m => [Def] -> Expr -> (Expr -> m Expr) -> m Expr
+runInDefs defs expr handler = loop expr
+  where defs' = evalDefs defs
+        loop expr = case stepInDefs defs' expr of
+          Done -> return expr
+          Next e -> loop e
+          Yield c e -> do
+            e' <- handler e
+            loop $ plug c e'
 
 testHandler :: Expr -> Writer String Expr
 testHandler (Perform (Lit (String s))) = do
