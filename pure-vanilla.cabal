@@ -14,5 +14,20 @@ extra-source-files:  README.md
 executable pure-vanilla
   hs-source-dirs:      src
   main-is:             Main.hs
+  other-modules:       VanillaCore, VanillaParser
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
+                     , containers
+                     , mtl
+                     , parsec
+                     , QuickCheck
+
+test-suite test-pure-vanilla
+  hs-source-dirs:      src
+  type:                exitcode-stdio-1.0
+  main-is:             Test.hs
+  build-depends:       base >= 4.7 && < 5
+                     , containers
+                     , mtl
+                     , parsec
+                     , QuickCheck

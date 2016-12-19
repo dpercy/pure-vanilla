@@ -1,8 +1,8 @@
 #!/usr/bin/env runghc
 {-# OPTIONS_GHC -W #-}
 {-# LANGUAGE TemplateHaskell, QuasiQuotes, OverloadedLists, TypeFamilies, FlexibleContexts, EmptyCase #-}
-import VanillaCore hiding (main)
-import VanillaParser hiding (main)
+import VanillaCore
+import VanillaParser
 
 import Data.Char (ord)
 import System.IO.Error (catchIOError)
@@ -48,3 +48,4 @@ main :: IO ()
 main = do
   Lit (Symbol "ok") <- runMain wc handler
   return ()
+

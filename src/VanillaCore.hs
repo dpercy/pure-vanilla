@@ -518,5 +518,5 @@ prop_runMain_ex1 =
 -- scary quickCheck macros!
 -- see haskell docs for quickCheckAll
 return []
-main :: IO ()
-main = $quickCheckAll >> return ()
+test :: IO Bool
+test = $quickCheckAll

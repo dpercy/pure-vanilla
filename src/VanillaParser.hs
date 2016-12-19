@@ -2,7 +2,7 @@
 {-# LANGUAGE TemplateHaskell, OverloadedLists, FlexibleContexts #-}
 module VanillaParser where
 
-import VanillaCore hiding (main)
+import VanillaCore
 
 import Test.QuickCheck
 import Text.Parsec hiding (token, space, spaces, newline)
@@ -253,5 +253,5 @@ prop_prims =
 -- scary quickCheck macros!
 -- see haskell docs for quickCheckAll
 return []
-main :: IO ()
-main = $quickCheckAll >> return ()
+test :: IO Bool
+test = $quickCheckAll
