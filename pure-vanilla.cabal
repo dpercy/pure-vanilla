@@ -11,7 +11,7 @@ cabal-version:       >=1.10
 
 executable pure-vanilla
   hs-source-dirs:      src
-  main-is:             Main.hs
+  main-is:             VanillaServer.hs
   other-modules:       VanillaCore, VanillaParser
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
