@@ -1,4 +1,4 @@
-module Test where
+module Main where
 
 import qualified VanillaCore (test)
 import qualified VanillaParser (test)
