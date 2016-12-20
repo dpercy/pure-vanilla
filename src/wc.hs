@@ -1,6 +1,8 @@
 #!/usr/bin/env runghc
 {-# OPTIONS_GHC -W #-}
 {-# LANGUAGE TemplateHaskell, QuasiQuotes, OverloadedLists, TypeFamilies, FlexibleContexts, EmptyCase #-}
+module Main where
+
 import VanillaCore
 import VanillaParser
 

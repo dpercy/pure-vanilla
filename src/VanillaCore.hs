@@ -1,10 +1,11 @@
 {-# OPTIONS_GHC -W #-}
-{-# LANGUAGE TemplateHaskell, OverloadedLists, TypeFamilies, FlexibleContexts, EmptyCase #-}
+{-# LANGUAGE TemplateHaskell, OverloadedLists, TypeFamilies, FlexibleContexts, EmptyCase, DeriveGeneric #-}
 module VanillaCore where
 
 import Test.QuickCheck
 import qualified Data.Map as Map
 import Data.Map (Map)
+import GHC.Generics
 import GHC.Exts
 import Data.List (find)
 import Data.Void
@@ -12,14 +13,14 @@ import Control.Monad.Writer
 
 
 data Def = Def String Expr
-         deriving (Eq, Show)
+         deriving (Eq, Show, Generic)
 
 data Atom = Null
           | Bool Bool
           | Integer Integer
           | String String
           | Symbol String
-          deriving (Eq, Show)
+          deriving (Eq, Show, Generic)
 
 instance Num Atom where
   fromInteger = Integer
@@ -41,7 +42,7 @@ data Expr = Upref Integer -- de bruijn index
           | App Expr Expr -- expr must evaluate to an argument-list
           | If Expr Expr Expr
           | Error String
-          deriving (Eq, Show)
+          deriving (Eq, Show, Generic)
 
 
 data PrimFunc = OpIsEmpty
@@ -52,7 +53,7 @@ data PrimFunc = OpIsEmpty
               | OpUntag
               | OpPlus
               | OpLessThan
-              deriving (Eq, Show)
+              deriving (Eq, Show, Generic)
 
 unop :: (Expr -> Expr) -> [Expr] -> Expr
 unop f [a] = f a

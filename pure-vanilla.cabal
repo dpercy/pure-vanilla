@@ -15,19 +15,23 @@ executable pure-vanilla
   other-modules:       VanillaCore, VanillaParser
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
+                     , aeson
                      , containers
                      , mtl
                      , parsec
+                     , template-haskell
                      , QuickCheck
 
 test-suite test-pure-vanilla
   hs-source-dirs:      src
   main-is:             Test.hs
-  other-modules:       VanillaCore, VanillaParser
+  other-modules:       VanillaCore, VanillaParser, VanillaServer
   default-language:    Haskell2010
   type:                exitcode-stdio-1.0
   build-depends:       base >= 4.7 && < 5
+                     , aeson
                      , containers
                      , mtl
                      , parsec
+                     , template-haskell
                      , QuickCheck
