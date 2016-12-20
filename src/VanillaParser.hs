@@ -80,6 +80,7 @@ def :: Parser Def
 def = "definition" & do
   lhs <- variable
   tok_equals
+  optional tok_newline
   rhs <- expr
   return $ Def lhs rhs
 
