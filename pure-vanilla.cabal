@@ -11,18 +11,23 @@ cabal-version:       >=1.10
 
 executable pure-vanilla
   hs-source-dirs:      src
-  main-is:             VanillaServer.hs
+  main-is:             Main.hs
   other-modules:       VanillaCore
                      , VanillaParser
                      , VanillaServer
                      , VanillaPrinter
                      , ExampleWordCount
+                     , Str
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
                      , aeson
+                     , bytestring
                      , containers
+                     , http-types
                      , mtl
                      , parsec
+                     , scotty
+                     , transformers
                      , wl-pprint
                      , template-haskell
                      , QuickCheck
@@ -40,9 +45,13 @@ test-suite test-pure-vanilla
   type:                exitcode-stdio-1.0
   build-depends:       base >= 4.7 && < 5
                      , aeson
+                     , bytestring
                      , containers
+                     , http-types
                      , mtl
                      , parsec
+                     , scotty
+                     , transformers
                      , wl-pprint
                      , template-haskell
                      , QuickCheck

@@ -1,13 +1,20 @@
 {-# OPTIONS_GHC -W #-}
-{-# LANGUAGE TemplateHaskell, OverloadedLists, FlexibleContexts, NamedFieldPuns, BangPatterns #-}
+{-# LANGUAGE TemplateHaskell, OverloadedLists, OverloadedStrings, FlexibleContexts, NamedFieldPuns, BangPatterns #-}
 module VanillaServer where
 
 import VanillaCore
+import VanillaParser (program, expr)
+import Text.Parsec (parse)
+import VanillaPrinter (showExpr, showDefs)
 
 import Test.QuickCheck
 import Data.IORef
 import qualified Data.Aeson as Aeson
-
+import Web.Scotty
+import Network.HTTP.Types.Status
+import Control.Monad.IO.Class
+import Data.ByteString.Lazy.Char8 (unpack)
+import Data.String (fromString)
 
 instance Aeson.FromJSON PrimFunc
 instance Aeson.FromJSON Atom
@@ -24,6 +31,7 @@ instance Aeson.ToJSON Def
 -- a server is some stateful object that lets you define and query things.
 data Server = Server { addDefs :: [Def] -> IO ()
                      , setDefs :: [Def] -> IO ()
+                     , getDefs :: IO [Def]
                      , query :: Expr -> IO Expr
                      }
 
@@ -60,8 +68,9 @@ mkServer :: IO Server
 mkServer = do
   defsBox <- newIORef ([] :: [Def])
   return Server {
-    addDefs = \defs -> update defsBox (unionDefs defs),
+    addDefs = \defs -> update defsBox (`unionDefs` defs),
     setDefs = \defs -> update defsBox (const defs),
+    getDefs = readIORef defsBox,
     query = \e -> do
       defs <- readIORef defsBox
       runInDefs defs e (const $ return $ Error "unhandled effect")
@@ -72,8 +81,42 @@ mkServer = do
 ---- TODO figure out how to download libraries for HTTP and JSON
 
 
+
+
+
 main :: IO ()
-main = error "TODO"
+main = do
+  server <- mkServer
+  scotty 3000 $ do
+    post "/addDefs" $ do
+      s <- body
+      case parse program "<in>" (unpack s) of
+       Left err -> do
+         status status400
+         text $ fromString $ "Parse error: " ++ show err
+       Right defs -> do
+         liftIO $ addDefs server defs
+         defs <- liftIO $ getDefs server
+         text $ fromString $ show $ showDefs defs
+    post "/setDefs" $ do
+      s <- body
+      case parse program "<in>" (unpack s) of
+       Left err -> do
+         status status400
+         text $ fromString $ "Parse error: " ++ show err
+       Right defs -> do
+         liftIO $ setDefs server defs
+         defs <- liftIO $ getDefs server
+         text $ fromString $ show $ showDefs defs
+    post "/query" $ do
+      s <- body
+      case parse expr "<in>" (unpack s) of
+       Left err -> do
+         status status400
+         text $ fromString $ "Parse error: " ++ show err
+       Right e -> do
+         result <- liftIO $ query server e
+         text $ fromString $ show $ showExpr result
 
 
 
