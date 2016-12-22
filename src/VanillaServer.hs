@@ -88,6 +88,9 @@ main :: IO ()
 main = do
   server <- mkServer
   scotty 3000 $ do
+    get "/" $ do
+      setHeader "Content-type" "text/html"
+      file "static/index.html"
     post "/addDefs" $ do
       s <- body
       case parse program "<in>" (unpack s) of

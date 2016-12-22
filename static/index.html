@@ -1,0 +1,97 @@
+<style>
+
+  #workspace {
+    width: 100%;
+    height: 100%;
+  }
+
+  #workspace > * {
+    width: calc(50% - 5px);
+    height: calc(100% - 5px);
+    display: inline-block;
+  }
+  textarea, #results {
+    font-family: Monaco, Consolas, monospace;
+    font-size: 26px;
+  }
+
+  #interactions > * {
+    width: calc(100% - 5px);
+    height: calc(50% - 5px);
+    display: block;
+  }
+
+  #definitions {
+    position: absolute;
+    top: 0;
+    left: 0;
+  }
+  #interactions {
+    position: absolute;
+    top: 0;
+    right: 0;
+  }
+
+  #results {
+    border: 1px solid black;
+  }
+
+</style>
+
+<div id="workspace">
+  <textarea id="definitions"></textarea>
+  <div id="interactions">
+    <textarea id="query"></textarea>
+    <div id="results"></div>
+  </div>
+</div>
+
+<script>
+  var defsWindow = document.getElementById('definitions');
+  var queryWindow = document.getElementById('query');
+  var resultsWindow = document.getElementById('results');
+
+  var xhr = new XMLHttpRequest();
+  xhr.open("POST", "/addDefs", true);
+  xhr.onreadystatechange = function() {
+    if (xhr.readyState == 4 && xhr.status == 200) {
+      defsWindow.value = xhr.responseText;
+    }
+  };
+  xhr.send('');
+
+  function redef() {
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", "/setDefs", true);
+    xhr.onreadystatechange = function() {
+      if (xhr.readyState == 4 && xhr.status == 200) {
+	// yay
+	console.log('setDefs', xhr.responseText);
+
+	// whenever you redef, also requery,
+	// since the query depends on the defs
+	requery();
+      }
+    };
+    xhr.send(defsWindow.value);
+  }
+  defsWindow.addEventListener('keyup', redef);
+
+  function requery() {
+    if (queryWindow.value.trim() === '') {
+      resultsWindow.innerText = '';
+    } else {
+      var xhr = new XMLHttpRequest();
+      xhr.open("POST", "/query", true);
+      xhr.onreadystatechange = function() {
+	if (xhr.readyState == 4 && xhr.status == 200) {
+	  // yay
+	  resultsWindow.innerText = xhr.responseText;
+	}
+      };
+      xhr.send(queryWindow.value);
+    }
+  }
+  queryWindow.addEventListener('keyup', requery);
+
+</script>
