@@ -101,17 +101,43 @@ keywords = [ "let", "in", "if", "then", "else" ]
 
 
 expr :: Parser Expr
-expr = "expression" & do
-  primary <- (literal
-              <|> Var `liftM` variable
-              <|> lambda
-              <|> try (Var `liftM` parens tok_op)
-              <|> prefixOp
-              <|> parens expr
-              <|> letExpr
-              <|> ifExpr)
-  call primary <|> infixOp primary <|> return primary
--- TODO resolve ambiguities like f = - 1 + 2
+expr = "expression" & (lambda
+                       <|> letExpr
+                       <|> ifExpr
+                       <|> arith
+                      )
+-- A leaf is an expression that cannot be split.
+
+-- Variables and literals are leaves,
+-- because they consist of only one token.
+    
+-- A parenthesized expression is also a leaf because the
+-- parens hold it together: if you tried to split it, you'd
+-- get a paren mismatch error instead of an incorrect parse.
+    
+-- A lambda cannot be a leaf expression because
+--  () -> 1 + 2
+-- could be read as either () -> (1 + 2) or (() -> 1) + 2.
+-- The same problem affects if-expressions and let-expressions.
+leaf = literal
+       <|> Var `liftM` variable
+       <|> try (Var `liftM` parens tok_op)  -- like (+)
+       <|> parens expr
+factor = do head <- leaf
+            -- TODO test curried calls like f(1)(2)
+            call head <|> return head
+arith = prefixOp <|> infixOrFactor
+ where prefixOp = do op <- try tok_op
+                     arg <- factor
+                     return $ app op [arg]
+       infixOrFactor = do e <- factor
+                          infixOp e <|> return e
+       infixOp arg0 = do op <- tok_op
+                         arg1 <- factor
+                         return $ app op [arg0, arg1]
+
+
+
 
 literal :: Parser Expr
 literal = "literal" & (num <|> sym)
@@ -138,15 +164,6 @@ call callee = do args <- parens (expr `sepEndBy` tok_comma)
                  return $ case callee of
                            Var op -> app op args
                            _ -> App callee (foldr Cons (Lit Null) args)
-
-prefixOp :: Parser Expr
-prefixOp = do op <- tok_op
-              arg <- expr
-              return $ app op [arg]
-
-infixOp arg0 = do op <- tok_op
-                  arg1 <- expr
-                  return $ app op [arg0, arg1]
 
 letExpr :: Parser Expr
 letExpr = do keyword "let"
@@ -224,7 +241,7 @@ prop_call =
 prop_prefix =
   pp "f = () -> (- x)"
   == [  Def "f" (func []
-                 (App (Var "-") [Var "x"]))
+                 (App (Prim OpMinus) [Var "x"]))
      ]
 
 prop_ops =
@@ -252,6 +269,18 @@ prop_conditionals =
 prop_prims =
   pp "v = 1 < 2"
   == [ Def "v" (App (Prim OpLessThan) [1, 2]) ]
+
+prop_if_has_lower_precedence_than_infix =
+  pp "v = if 1 then 2 else 3 + 4"
+  == [ Def "v" (If 1 2 (App (Prim OpPlus) [3, 4])) ]
+
+prop_if_has_lower_precedence_than_apply =
+  pp "v = if 1 then 2 else f(3)"
+  == [ Def "v" (If 1 2 (App (Var "f") [3])) ]
+
+prop_if_has_lower_precedence_than_apply_then_infix =
+  pp "v = if 1 then 2 else 3(4) + 5"
+  == [ Def "v" (If 1 2 (App (Prim OpPlus) [App 3 [4], 5])) ]
 
 
 -- scary quickCheck macros!

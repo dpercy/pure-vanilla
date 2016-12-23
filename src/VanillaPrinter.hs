@@ -20,7 +20,8 @@ showDefs :: [Def] -> Doc
 showDefs defs = vcat $ intersperse "" $ map showDef defs
 
 showDef :: Def -> Doc
-showDef (Def x e) = sep [showId x <+> char '=', hang 2 (showExpr e)]
+--showDef (Def x e) = sep [showId x <+> char '=', hang 2 (showExpr e)]
+showDef (Def x e) = showId x <+> char '=' <+> hang 2 (showExpr e)
 
 showExpr :: Expr -> Doc
 -- TODO better handling of uprefs:
@@ -36,7 +37,7 @@ showExpr (Lit (Symbol s)) = text (':':s)
 showExpr (Perform eff) = "perform(" <> showExpr eff <> ")"
 showExpr (Cons hd tl) = "cons(" <> showExpr hd <> ", " <> showExpr tl <> ")"
 showExpr (Tag k v) = "tag(" <> showExpr k <> ", " <> showExpr v <> ")"
-showExpr (Func params body) = sep [ params' <+> "->", hang 2 body' ]
+showExpr (Func params body) = sep [ params' <+> "->", body' ]
   where params' = parens $ sep $ punctuate "," $ map showId params
         body' = showExpr body
 showExpr (App (Func [x] body) [e]) = sep [ hsep [ "let", showId x, "=", showExpr e, "in" ]

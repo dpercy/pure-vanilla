@@ -529,8 +529,6 @@ prop_runMain_ex1 =
   runWriter (runMain [ Def "main" (Func [] (Perform (Lit $ String "hi"))) ] testHandler)
   == ((Lit $ Symbol "ok"), "hi")
 
-
-
 -- scary quickCheck macros!
 -- see haskell docs for quickCheckAll
 return []
