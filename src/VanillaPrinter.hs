@@ -39,9 +39,9 @@ showExpr (Tag k v) = "tag(" <> showExpr k <> ", " <> showExpr v <> ")"
 showExpr (Func params body) = sep [ params' <+> "->", hang 2 body' ]
   where params' = parens $ sep $ punctuate "," $ map showId params
         body' = showExpr body
-showExpr (App (Func [x] body) e) = sep [ hsep [ "let", showId x, "=", showExpr e, "in" ]
-                                       , showExpr body
-                                       ]
+showExpr (App (Func [x] body) [e]) = sep [ hsep [ "let", showId x, "=", showExpr e, "in" ]
+                                         , showExpr body
+                                         ]
 showExpr (App f a) = case f of
   Prim op -> showInfix (primName op) a
   Var s | isOperator s -> showInfix s a
