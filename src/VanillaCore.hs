@@ -52,6 +52,8 @@ data PrimFunc = OpIsEmpty
               | OpIsTagged
               | OpUntag
               | OpPlus
+              | OpMinus
+              | OpTimes
               | OpLessThan
               deriving (Eq, Show, Generic)
 
@@ -85,6 +87,17 @@ applyPrim OpUntag    = binop $ \k t -> case k of
 applyPrim OpPlus = binop $ \x y -> case (x, y) of
   ((Lit (Integer x)), (Lit (Integer y))) -> Lit (Integer (x + y))
   _ -> Error "plus a non-integer"
+-- minus is special: both a binop and unop
+applyPrim OpMinus = \args -> case args of
+  [] -> Error "not enough args"
+  [(Lit (Integer x))] -> Lit (Integer (- x))
+  [(Lit (Integer x)), (Lit (Integer y))] -> Lit (Integer (x - y))
+  [_] -> Error "minus a non-integer"
+  [_, _] -> Error "minus a non-integer"
+  _ -> Error "too many args"
+applyPrim OpTimes = binop $ \x y -> case (x, y) of
+  ((Lit (Integer x)), (Lit (Integer y))) -> Lit (Integer (x * y))
+  _ -> Error "times a non-integer"
 applyPrim OpLessThan = binop $ \x y -> case (x, y) of
   ((Lit (Integer x)), (Lit (Integer y))) -> Lit (Bool (x < y))
   _ -> Error "less-than a non-integer"

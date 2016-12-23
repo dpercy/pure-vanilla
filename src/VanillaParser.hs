@@ -169,6 +169,9 @@ app "perform" [e] = Perform e
 app "cons" [x, y] = Cons x y
 app "tag" [x, y] = Tag x y
 app "+" [x, y] = App (Prim OpPlus) [x, y]
+app "-" [x, y] = App (Prim OpMinus) [x, y]
+app "-" [x] = App (Prim OpMinus) [x] -- minus has two cases
+app "*" [x, y] = App (Prim OpTimes) [x, y]
 app "<" [x, y] = App (Prim OpLessThan) [x, y]
 -- TODO more cases for more ops
 app f a = App (Var f) (foldr Cons (Lit Null) a)

@@ -76,6 +76,8 @@ primName OpRest = "rest"
 primName OpIsTagged = "isTagged"
 primName OpUntag = "untag"
 primName OpPlus = "+"
+primName OpMinus = "-"
+primName OpTimes = "*"
 primName OpLessThan = "<"
 
 
