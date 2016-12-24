@@ -5,7 +5,7 @@ module VanillaServer where
 import VanillaCore
 import VanillaParser (program, expr)
 import Text.Parsec (parse)
-import VanillaPrinter (showExpr, showDefs)
+import VanillaPrinter (showExpr, toplevelEnv, showDefs)
 
 import Test.QuickCheck
 import Data.IORef
@@ -119,7 +119,14 @@ main = do
          text $ fromString $ "Parse error: " ++ show err
        Right e -> do
          result <- liftIO $ query server e
-         text $ fromString $ show $ showExpr result
+         -- Which env should we use to render the result?
+         -- It has to be one constructed from the definitions window.
+         -- The expression might evaluate to a lambda, which can refer to globals.
+         env <- do defs <- liftIO $ getDefs server -- for scoping
+                   let globals = map (\(Def x _) -> x) defs
+                   let env = toplevelEnv globals
+                   return env
+         text $ fromString $ show $ showExpr env result
 
 
 

@@ -31,7 +31,12 @@ instance Num Atom where
   signum = error "Num Atom signum"
 
 
-data Expr = Upref Integer -- de bruijn index
+data Expr = Upref Int -- de bruijn index.
+            -- Note that uprefs use a fixed-size Int,
+            -- instead of an arbitrarily-sized Integer,
+            -- because 1. Haskell lists are indexed by Int
+            --         2. in practice you're limited by the address space anyway
+            --         3. God help you if your program's scope depth exceeds a ~30 bit Int!
           | Var String
           | Prim PrimFunc
           | Lit Atom
@@ -55,7 +60,9 @@ data PrimFunc = OpIsEmpty
               | OpMinus
               | OpTimes
               | OpLessThan
-              deriving (Eq, Show, Generic)
+              deriving (Eq, Show, Generic, Enum, Bounded)
+allPrimops :: [PrimFunc]
+allPrimops = enumFrom minBound
 
 unop :: (Expr -> Expr) -> [Expr] -> Expr
 unop f [a] = f a
@@ -200,14 +207,11 @@ prop_split_ex2 =
   == (Split Hole (App 1 2))
 
 
-len :: [a] -> Integer
-len = toInteger . length
-
 -- convenience for writing functions without thinking about de bruijn indices.
 func :: [String] -> Expr -> Expr
 func ps body = Func ps (sub env body)
-  where env :: Map String Integer
-        env = Map.fromList (zip ps (reverse [0..(len ps)-1]))
+  where env :: Map String Int
+        env = Map.fromList (zip ps (reverse [0..(length ps)-1]))
         sub _(Upref i) = Upref i
         sub env (Var x) = case Map.lookup x env of
                                 Nothing -> Var x
@@ -217,7 +221,7 @@ func ps body = Func ps (sub env body)
         sub env (Perform eff) = Perform (sub env eff)
         sub env (Cons hd tl) = Cons (sub env hd) (sub env tl)
         sub env (Tag k v) = Tag (sub env k) (sub env v)
-        sub env (Func ps body) = Func ps (sub (Map.map (+ (len ps)) env) body)
+        sub env (Func ps body) = Func ps (sub (Map.map (+ (length ps)) env) body)
         sub env (App f a) = App (sub env f) (sub env a)
         sub env (If t c a) = If (sub env t) (sub env c) (sub env a)
         sub _ (Error s) = Error s
@@ -270,11 +274,11 @@ stepRoot (App (Prim op) args) = case parseExprList args of
                                  Just args -> applyPrim op args
 stepRoot (App (Func params body) args) = case parseExprList args of
   Nothing -> Error "args must be a list"
-  Just args -> if len params == len args
+  Just args -> if length params == length args
                then sub startEnv body
                else Error "arity"
-    where startEnv :: Map Integer Expr
-          startEnv = Map.fromList (zip (reverse [0..(len args)-1]) args)
+    where startEnv :: Map Int Expr
+          startEnv = Map.fromList (zip (reverse [0..(length args)-1]) args)
           sub env (Upref i) = case Map.lookup i env of
                           Nothing -> Upref i
                           Just expr -> expr
@@ -284,7 +288,7 @@ stepRoot (App (Func params body) args) = case parseExprList args of
           sub env (Perform eff) = Perform (sub env eff)
           sub env (Cons hd tl) = Cons (sub env hd) (sub env tl)
           sub env (Tag k v) = Tag (sub env k) (sub env v)
-          sub env (Func ps body) = Func ps (sub (Map.mapKeys (+ (len ps)) env) body)
+          sub env (Func ps body) = Func ps (sub (Map.mapKeys (+ (length ps)) env) body)
           sub env (App f a) = App (sub env f) (sub env a)
           sub env (If t c a) = If (sub env t) (sub env c) (sub env a)
           sub _ (Error s) = Error s
