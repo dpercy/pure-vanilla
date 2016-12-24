@@ -32,9 +32,39 @@ toplevelEnv lhs = Env { globals = lhs ++ map primName allPrimops
                       , locals = []
                       }
 
-addParams :: [String] -> Env -> Env
--- TODO fix shadowing here
-addParams ps env = env{ locals = ps ++ locals env }
+incName :: String -> String
+incName word =
+  let rev = reverse word in
+  let num = case reverse $ takeWhile isDigit rev of
+             "" -> 0
+             s -> read s
+  in
+  let base = reverse $ dropWhile isDigit rev in
+  base ++ show (num + 1)
+
+consNoCollide :: [String] -> String -> [String] -> [String]
+consNoCollide ctx x xs = if x `elem` xs || x `elem` ctx
+                         then consNoCollide ctx (incName x) xs
+                         else x:xs
+
+appendNoCollide :: [String] -> [String] -> [String] -> [String]
+appendNoCollide ctx left right = foldr (consNoCollide ctx) right left
+
+prop_appendNoCollide_ex1 = appendNoCollide [] ["x", "x", "y", "z"] ["z", "x"]
+                           == ["x2", "x1", "y", "z1", "z", "x"]
+
+prop_incName_ex1 = incName "x0" == "x1"
+prop_incName_ex2 = incName "x9" == "x10"
+prop_incName_ex3 = incName "x" == "x1"
+
+
+addParams :: [String] -> Env -> ([String], Env)
+-- TODO when shadowing, you can avoid renaming if the shadowed variable
+--      doesn't appear free in the body.
+addParams ps env =
+  let (++) = appendNoCollide (globals env) in
+  let env' = env{ locals = ps ++ locals env } in
+  (take (length ps) (locals env'), env')
 
 lookupUpref :: Int -> Env -> String
 lookupUpref up env =
@@ -62,10 +92,10 @@ showExpr _   (Lit (Symbol s)) = text (':':s)
 showExpr env (Perform eff) = "perform(" <> showExpr env eff <> ")"
 showExpr env (Cons hd tl) = "cons(" <> showExpr env hd <> ", " <> showExpr env tl <> ")"
 showExpr env (Tag k v) = "tag(" <> showExpr env k <> ", " <> showExpr env v <> ")"
-showExpr env (Func params body) = sep [ params' <+> "->", body' ]
-  where env' = addParams params env
-        params' = parens $ sep $ punctuate "," $ map showId params
-        body' = showExpr env' body
+showExpr env (Func params body) = sep [ paramsDoc <+> "->", bodyDoc ]
+  where (params', env') = addParams params env
+        paramsDoc = parens $ sep $ punctuate "," $ map showId params'
+        bodyDoc = showExpr env' body
 showExpr env (App (Func [x] body) [e]) = sep [ hsep [ "let", showId x, "=", showExpr env e, "in" ]
                                          , showExpr env body
                                          ]
@@ -110,7 +140,7 @@ primName OpLessThan = "<"
 
 
 showId :: String -> Doc
-showId x = if and (map isLetter x) then text x
+showId x = if and (map isAlphaNum x) then text x
            else char '(' <> text x <> char ')'
 
 prop_wc_reparse =
