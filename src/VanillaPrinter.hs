@@ -78,7 +78,7 @@ showDefs defs = vcat $ intersperse "" $ map (showDef env) defs
   where env = toplevelEnv (map (\(Def lhs _) -> lhs) defs)
 
 showDef :: Env -> Def -> Doc
-showDef env (Def x e) = showId x <+> char '=' <+> hang 2 (showExpr env e)
+showDef env (Def x e) = hang 2 $ showId x <+> char '=' <+> showExpr env e
 
 showExpr :: Env -> Expr -> Doc
 showExpr env (Upref i) = showId (lookupUpref i env)
@@ -92,7 +92,7 @@ showExpr _   (Lit (Symbol s)) = text (':':s)
 showExpr env (Perform eff) = "perform(" <> showExpr env eff <> ")"
 showExpr env (Cons hd tl) = "cons(" <> showExpr env hd <> ", " <> showExpr env tl <> ")"
 showExpr env (Tag k v) = "tag(" <> showExpr env k <> ", " <> showExpr env v <> ")"
-showExpr env (Func params body) = sep [ paramsDoc <+> "->", bodyDoc ]
+showExpr env (Func params body) = hang 2 $ sep [ paramsDoc <+> "->", bodyDoc ]
   where (params', env') = addParams params env
         paramsDoc = parens $ sep $ punctuate "," $ map showId params'
         bodyDoc = showExpr env' body

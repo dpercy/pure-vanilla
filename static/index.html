@@ -42,7 +42,7 @@
   <textarea id="definitions"></textarea>
   <div id="interactions">
     <textarea id="query"></textarea>
-    <div id="results"></div>
+    <textarea disabled id="results"></textarea>
   </div>
 </div>
 
@@ -79,14 +79,15 @@
 
   function requery() {
     if (queryWindow.value.trim() === '') {
-      resultsWindow.innerText = '';
+      resultsWindow.value = '';
     } else {
       var xhr = new XMLHttpRequest();
       xhr.open("POST", "/query", true);
       xhr.onreadystatechange = function() {
 	if (xhr.readyState == 4 && xhr.status == 200) {
 	  // yay
-	  resultsWindow.innerText = xhr.responseText;
+	  resultsWindow.value = xhr.responseText;
+	  console.log('result', xhr.responseText);
 	}
       };
       xhr.send(queryWindow.value);
