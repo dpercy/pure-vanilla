@@ -1,56 +1,53 @@
 <style>
 
-  #workspace {
-    width: 100%;
-    height: 100%;
-  }
-
-  #workspace > * {
-    width: calc(50% - 5px);
-    height: calc(100% - 5px);
-    display: inline-block;
-  }
-  textarea, #results {
+  /* styles */
+  textarea {
     font-family: Monaco, Consolas, monospace;
     font-size: 26px;
   }
-
-  #interactions > * {
-    width: calc(100% - 5px);
-    height: calc(50% - 5px);
-    display: block;
+  .error {
+    font-color: red;
   }
 
-  #definitions {
-    position: absolute;
-    top: 0;
-    left: 0;
+  /* layout */
+  #workspace {
+    width: 100%;
+    height: 100%;
+    display: flex;
   }
-  #interactions {
-    position: absolute;
-    top: 0;
-    right: 0;
+  #workspace > * {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
   }
-
-  #results {
-    border: 1px solid black;
+  #workspace > * > * {
+    width: 100%;
+    height: 100%;
   }
 
 </style>
 
 <div id="workspace">
-  <textarea id="definitions"></textarea>
-  <div id="interactions">
-    <textarea id="query"></textarea>
-    <textarea disabled id="results"></textarea>
+  <div>
+    <textarea placeholder="definitions" id="definitions"></textarea>
+    <textarea disabled hidden id="def-errors" class="error"></textarea>
+  </div>
+  <div>
+    <textarea placeholder="expression" id="query"></textarea>
+    <textarea placeholder="result" disabled id="results"></textarea>
   </div>
 </div>
 
 <script>
   var defsWindow = document.getElementById('definitions');
+  var defErrorsWindow = document.getElementById('def-errors');
   var queryWindow = document.getElementById('query');
   var resultsWindow = document.getElementById('results');
 
+  // On page load, use addDefs with an empty list of new definitions
+  // to query the current set of definitions.
+  // Then use that to populate the initial definitions window.
   var xhr = new XMLHttpRequest();
   xhr.open("POST", "/addDefs", true);
   xhr.onreadystatechange = function() {
@@ -64,13 +61,21 @@
     var xhr = new XMLHttpRequest();
     xhr.open("POST", "/setDefs", true);
     xhr.onreadystatechange = function() {
-      if (xhr.readyState == 4 && xhr.status == 200) {
-	// yay
-	console.log('setDefs', xhr.responseText);
-
-	// whenever you redef, also requery,
-	// since the query depends on the defs
-	requery();
+      if (xhr.readyState == 4) {
+        if (xhr.status == 200) {
+          // yay
+          console.log('setDefs', xhr.responseText);
+          // whenever you redef, also requery,
+          // since the query depends on the defs
+          defErrorsWindow.value = '';
+	  defErrorsWindow.hidden = true;
+          requery();
+        } else {
+          // error
+          console.log('setDefs error', xhr.responseText);
+          defErrorsWindow.value = xhr.responseText;
+	  defErrorsWindow.hidden = false;
+        }
       }
     };
     xhr.send(defsWindow.value);
@@ -84,10 +89,18 @@
       var xhr = new XMLHttpRequest();
       xhr.open("POST", "/query", true);
       xhr.onreadystatechange = function() {
-	if (xhr.readyState == 4 && xhr.status == 200) {
-	  // yay
-	  resultsWindow.value = xhr.responseText;
-	  console.log('result', xhr.responseText);
+	if (xhr.readyState == 4) {
+	  if (xhr.status == 200) {
+    	    // yay
+    	    resultsWindow.value = xhr.responseText;
+	    resultsWindow.removeClass('error');
+    	    console.log('interactions result', xhr.responseText);
+    	  } else {
+    	    // error
+    	    resultsWindow.value = xhr.responseText;
+	    resultsWindow.addClass('error');
+    	    console.log('interactions error', xhr.responseText);
+    	  }
 	}
       };
       xhr.send(queryWindow.value);
