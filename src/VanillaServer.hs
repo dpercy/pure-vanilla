@@ -15,6 +15,7 @@ import Network.HTTP.Types.Status
 import Control.Monad.IO.Class
 import Data.ByteString.Lazy.Char8 (unpack)
 import Data.String (fromString)
+import System.Timeout
 
 instance Aeson.FromJSON PrimFunc
 instance Aeson.FromJSON Atom
@@ -118,16 +119,22 @@ main = do
          status status400
          text $ fromString $ "Parse error: " ++ show err
        Right e -> do
-         result <- liftIO $ query server e
-         -- Which env should we use to render the result?
-         -- It has to be one constructed from the definitions window.
-         -- The expression might evaluate to a lambda, which can refer to globals.
-         env <- do defs <- liftIO $ getDefs server -- for scoping
-                   let globals = map (\(Def x _) -> x) defs
-                   let env = toplevelEnv globals
-                   return env
-         text $ fromString $ show $ showExpr env result
+         resultOrTimeout <- liftIO $ timeout requestTimeoutMicros $ query server e
+         case resultOrTimeout of
+          Nothing -> do status status400
+                        text $ fromString $ "Computation timed out"
+          Just result -> do
+            -- Which env should we use to render the result?
+            -- It has to be one constructed from the definitions window.
+            -- The expression might evaluate to a lambda, which can refer to globals.
+            env <- do defs <- liftIO $ getDefs server -- for scoping
+                      let globals = map (\(Def x _) -> x) defs
+                      let env = toplevelEnv globals
+                      return env
+            text $ fromString $ show $ showExpr env result
 
+requestTimeoutMicros :: Int
+requestTimeoutMicros = 1 * 1000 * 1000
 
 
 -- scary quickCheck macros!
