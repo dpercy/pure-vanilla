@@ -96,9 +96,10 @@ showExpr env (Func params body) = hang 2 $ sep [ paramsDoc <+> "->", bodyDoc ]
   where (params', env') = addParams params env
         paramsDoc = parens $ sep $ punctuate "," $ map showId params'
         bodyDoc = showExpr env' body
-showExpr env (App (Func [x] body) [e]) = sep [ hsep [ "let", showId x, "=", showExpr env e, "in" ]
-                                         , showExpr env body
+showExpr env (App (Func [x] body) [e]) = sep [ hsep [ "let", showId x', "=", showExpr env e, "in" ]
+                                         , showExpr env' body
                                          ]
+  where ([x'], env') = addParams [x] env
 showExpr env (App f a) = case f of
   Prim op -> showInfix env (primName op) a
   Var s | not (isId s) -> showInfix env s a

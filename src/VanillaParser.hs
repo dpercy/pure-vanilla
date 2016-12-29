@@ -182,7 +182,8 @@ letExpr = do keyword "let"
 -- since the else part is mandatory,
 -- there should be no ambiguity when nesting ifs.
 ifExpr :: Parser Expr
-ifExpr = do keyword "if" ; t <- expr ; keyword "then" ; c <- expr ; optional tok_newline
+ifExpr = do keyword "if" ; t <- expr   ; optional tok_newline
+            keyword "then" ; c <- expr ; optional tok_newline
             keyword "else" ; e <- expr ; optional tok_newline
             return $ If t c e
 
