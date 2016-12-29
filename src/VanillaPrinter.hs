@@ -101,9 +101,8 @@ showExpr env (App (Func [x] body) [e]) = sep [ hsep [ "let", showId x, "=", show
                                          ]
 showExpr env (App f a) = case f of
   Prim op -> showInfix env (primName op) a
-  Var s | isOperator s -> showInfix env s a
+  Var s | not (isId s) -> showInfix env s a
   _ -> showExpr env f <> showArgs env a
-  where isOperator s = and $ map (not . isLetter) s
         
 showExpr env (If t c a) = sep [ "if" <+> showExpr env t
                           , "then" <+> showExpr env c
@@ -114,6 +113,8 @@ showExpr _   (Error msg) = "error(" <> text (show msg) <> ")"
 showInfix :: Env -> String -> Expr -> Doc
 showInfix env op a = case parseExprList a of
   Nothing -> text op <> showArgs env a
+  Just []  -> showExpr env (Var op) <> showArgs env a
+  Just [a0] -> text op <+> showExpr env a0
   Just a' -> hsep $ intersperse (text op) (map (showExpr env) a')
 
 -- TODO use flatAlt to have a different representation when one line vs multiline
@@ -137,10 +138,12 @@ primName OpMinus = "-"
 primName OpTimes = "*"
 primName OpLessThan = "<"
 
-
+isId :: String -> Bool
+isId = and . map isIdChar
+  where isIdChar c = isLetter c || isDigit c || c == '_'
 
 showId :: String -> Doc
-showId x = if and (map isAlphaNum x) then text x
+showId x = if isId x then text x
            else char '(' <> text x <> char ')'
 
 prop_wc_reparse =

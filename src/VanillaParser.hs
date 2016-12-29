@@ -57,7 +57,12 @@ token p = do
   return v
 
 tok_equals = token $ char '='
-tok_id = token $ many1 letter -- TODO digit, underscore...
+tok_id = token $ do
+  let starter = letter <|> oneOf "_"
+  let mid = starter <|> digit
+  c <- starter
+  cs <- many mid
+  return (c:cs)
 tok_sym = token $ char ':' >> many1 letter
 tok_op = token $ many1 (oneOf "~!@#$%^&*-=+|\\<>/?")
 tok_semicolon = token $ char ';'
