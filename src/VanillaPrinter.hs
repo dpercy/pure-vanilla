@@ -11,6 +11,7 @@ import Text.PrettyPrint.Leijen
 import Data.Char
 import Data.String
 import Data.List
+import Data.Ratio
 
 instance IsString Doc where
   fromString = text
@@ -86,7 +87,9 @@ showExpr _   (Var x) = showId x
 showExpr _   (Prim op) = showId $ primName op
 showExpr _   (Lit Null) = "null"
 showExpr _   (Lit (Bool b)) = if b then "true" else "false"
-showExpr _   (Lit (Integer i)) = text (show i)
+showExpr _   (Lit (Num n)) = case denominator n of
+  1 -> text $ (show $ numerator n)
+  d -> text $ (show $ numerator n) ++ "/" ++ (show d)
 showExpr _   (Lit (String s)) = text (show s)
 showExpr _   (Lit (Symbol s)) = text (':':s)
 showExpr env (Perform eff) = "perform(" <> showExpr env eff <> ")"

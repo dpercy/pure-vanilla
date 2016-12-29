@@ -38,10 +38,10 @@ getOrd = (catchIOError (do
 handler :: Expr -> IO Expr
 handler (Perform (Lit (Symbol "read"))) = do
   c <- getOrd
-  return (Lit (Integer c))
+  return (Lit (Num $ fromInteger c))
 handler (Perform (Tag
                   (Lit (Symbol "write"))
-                  (Lit (Integer n)))) = do
+                  (Lit (Num n)))) = do
   putStrLn $ show n
   return (Lit $ String "ok")
 handler _ = undefined "no handler for this effect"

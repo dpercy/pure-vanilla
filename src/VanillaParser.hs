@@ -9,6 +9,7 @@ import Text.Parsec hiding (token, space, spaces, newline)
 import Control.Monad
 import Data.Functor.Identity
 import Data.Char
+import Data.Ratio
 
 {-
 
@@ -71,7 +72,18 @@ tok_openParen = token $ char '('
 tok_closeParen = token $ char ')'
 tok_comma = token $ char ','
 tok_arrow = token $ string "->"
+tok_int :: Parser Integer
 tok_int = token $ read `liftM` many1 digit
+tok_ratio :: Parser Rational
+tok_ratio = token $ do n <- many1 digit
+                       char '/'
+                       d <- many1 digit
+                       return (read n % read d)
+tok_decimal :: Parser Rational
+tok_decimal = token $ do realPart <- many1 digit
+                         char '.'
+                         fracPart <- many1 digit
+                         return $ (fromInteger $ read realPart) + (read fracPart % 10 ^ length fracPart)
 parens = between tok_openParen tok_closeParen
 
 program :: Parser [Def]
@@ -145,11 +157,15 @@ arith = prefixOp <|> infixOrFactor
 
 
 literal :: Parser Expr
-literal = "literal" & (num <|> sym)
-  where num = do n <- tok_int
-                 return (Lit $ Integer n)
-        sym = do s <- tok_sym
-                 return (Lit $ Symbol s)
+literal = "literal" & (dec <|> frac <|> int <|> sym)
+  where dec = "decimal" & do n <- try tok_decimal
+                             return (Lit $ Num $ n)
+        frac = "fraction" & do n <- try tok_ratio
+                               return (Lit $ Num $ n)
+        int = "integer" & do n <- try tok_int
+                             return (Lit $ Num $ fromInteger n)
+        sym = "symbol" & do s <- tok_sym
+                            return (Lit $ Symbol s)
           
 
 lambda :: Parser Expr
@@ -211,9 +227,11 @@ prop_empty =
   pp "" == []
   
 prop_example =
-  pp " x = 1 ; y = :wut "
+  pp " x = 1 ; y = :wut ; z = 1/2 ; q = 3.5"
    == [ Def "x" 1
       , Def "y" (Lit $ Symbol "wut")
+      , Def "z" (1/2)
+      , Def "q" 3.5
       ]
 
 prop_newline =

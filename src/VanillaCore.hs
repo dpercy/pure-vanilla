@@ -17,18 +17,23 @@ data Def = Def String Expr
 
 data Atom = Null
           | Bool Bool
-          | Integer Integer
+          | Num Rational
           | String String
           | Symbol String
           deriving (Eq, Show, Generic)
 
 instance Num Atom where
-  fromInteger = Integer
+  fromInteger = Num . fromInteger
   (+) = error "Num Atom (+)"
   (*) = error "Num Atom (*)"
   (-) = error "Num Atom (-)"
   abs = error "Num Atom abs"
   signum = error "Num Atom signum"
+
+instance Fractional Atom where
+  fromRational = Num
+  (Num a) / (Num b) = Num (a / b)
+  a / b = error $ "divide on non-Num Atom: " ++ (show a) ++ " / " ++ (show b)
 
 
 data Expr = Upref Int -- de bruijn index.
@@ -92,21 +97,21 @@ applyPrim OpUntag    = binop $ \k t -> case k of
                                         _ -> Error "untag key must be a symbol"
 
 applyPrim OpPlus = binop $ \x y -> case (x, y) of
-  ((Lit (Integer x)), (Lit (Integer y))) -> Lit (Integer (x + y))
+  ((Lit (Num x)), (Lit (Num y))) -> Lit (Num (x + y))
   _ -> Error "plus a non-integer"
 -- minus is special: both a binop and unop
 applyPrim OpMinus = \args -> case args of
   [] -> Error "not enough args"
-  [(Lit (Integer x))] -> Lit (Integer (- x))
-  [(Lit (Integer x)), (Lit (Integer y))] -> Lit (Integer (x - y))
+  [(Lit (Num x))] -> Lit (Num (- x))
+  [(Lit (Num x)), (Lit (Num y))] -> Lit (Num (x - y))
   [_] -> Error "minus a non-integer"
   [_, _] -> Error "minus a non-integer"
   _ -> Error "too many args"
 applyPrim OpTimes = binop $ \x y -> case (x, y) of
-  ((Lit (Integer x)), (Lit (Integer y))) -> Lit (Integer (x * y))
+  ((Lit (Num x)), (Lit (Num y))) -> Lit (Num (x * y))
   _ -> Error "times a non-integer"
 applyPrim OpLessThan = binop $ \x y -> case (x, y) of
-  ((Lit (Integer x)), (Lit (Integer y))) -> Lit (Bool (x < y))
+  ((Lit (Num x)), (Lit (Num y))) -> Lit (Bool (x < y))
   _ -> Error "less-than a non-integer"
 
 
@@ -124,13 +129,18 @@ parseExprList (Cons hd tl) = Just (hd:(toList tl))
 parseExprList _ = Nothing
 
 instance Num Expr where
-  fromInteger = Lit . Integer
+  fromInteger = Lit . fromInteger
   (+) = error "Num Expr (+)"
   (*) = error "Num Expr (*)"
-  (-) (Lit (Integer x)) (Lit (Integer y)) = (Lit (Integer (x - y)))
+  (-) (Lit (Num x)) (Lit (Num y)) = (Lit (Num (x - y)))
   (-) _ _ = error "subtraction on non-number expr"
   abs = error "Num Expr abs"
   signum = error "Num Expr signum"
+
+instance Fractional Expr where
+  fromRational = Lit . fromRational
+  (Lit a) / (Lit b) = Lit (a / b)
+  a / b = error $ "divide on non-Lit Expr: " ++ (show a) ++ " / " ++ (show b)
 
 data Context = Hole
              | Perform0 Context
@@ -458,12 +468,12 @@ prop_evalCycle = checkSteps stepDefs [
 -- We can't simply rule out this case at parse-time,
 -- because a non-tricky program can step to a tricky one:
 prop_evalShadowVar =
-  stepDefs [ Def "x" (Lit $ Integer 7)
+  stepDefs [ Def "x" (Lit $ Num 7)
            , Def "y" (App
                       (func ["v"] (func ["x"] (Var "v")))
                       [(func [] (Var "x"))])
            ]
-  == Next [ Def "x" (Lit $ Integer 7)
+  == Next [ Def "x" (Lit $ Num 7)
             -- Note the capitalized Func constructor:
             -- this Var "x" doesn't refer to the parameter "x".
           , Def "y" (Func ["x"] (Func [] (Var "x")))
