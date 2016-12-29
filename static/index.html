@@ -93,12 +93,12 @@
 	  if (xhr.status == 200) {
     	    // yay
     	    resultsWindow.value = xhr.responseText;
-	    resultsWindow.removeClass('error');
+	    resultsWindow.classList.remove('error');
     	    console.log('interactions result', xhr.responseText);
     	  } else {
     	    // error
     	    resultsWindow.value = xhr.responseText;
-	    resultsWindow.addClass('error');
+	    resultsWindow.classList.add('error');
     	    console.log('interactions error', xhr.responseText);
     	  }
 	}
