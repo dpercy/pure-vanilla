@@ -26,6 +26,10 @@
     height: 100%;
   }
 
+  #graph {
+    border: 1px solid #ddd;
+  }
+
 </style>
 
 <div id="workspace">
@@ -36,6 +40,10 @@
   <div>
     <textarea placeholder="expression" id="query"></textarea>
     <textarea placeholder="result" disabled id="results"></textarea>
+  </div>
+  <div>
+    <canvas id="graph">
+    </canvas>
   </div>
 </div>
 
@@ -89,6 +97,7 @@
           // yay
           console.log('residualDefs', xhr.responseText);
 	  eval("window.defs = " + xhr.responseText);
+	  redraw();
         } else {
           // error
           console.log('residualDefs error', xhr.responseText);
@@ -126,5 +135,94 @@
     }
   }
   queryWindow.addEventListener('keyup', requery);
+
+
+  var graph = document.getElementById('graph');
+  var pixelsPerUnit = 30;
+  var originX = 0;
+  var originY = 0;
+  function redraw() {
+    // set up the context
+    var ctx = graph.getContext('2d');
+    graph.width = graph.parentElement.clientWidth;
+    graph.height = graph.parentElement.clientHeight;
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.clearRect(0, 0, graph.width, graph.height);
+
+    // define some "manual transformation" variables:
+    // we'll keep the canvas in pixel-space and convert point-sets manually
+    pixelsPerUnit = 30;
+    originX = graph.width/2;
+    originY = graph.height/2;
+
+    // draw axis ticks
+    ctx.strokeStyle = "#888";
+    var tickLen = 5;
+    for (var sign=-1; sign<2; sign+=2) {
+      for (var x=1; x<100; ++x) {
+	ctx.beginPath();
+	ctx.moveTo(originX + sign*x*pixelsPerUnit, originY + 0);
+	ctx.lineTo(originX + sign*x*pixelsPerUnit, originY - tickLen);
+	ctx.stroke();
+      }
+      for (var y=1; y<100; ++y) {
+	ctx.beginPath();
+	ctx.moveTo(originX,           originY + sign*y*pixelsPerUnit);
+	ctx.lineTo(originX + tickLen, originY + sign*y*pixelsPerUnit);
+	ctx.stroke();
+      }
+    }
+
+    // draw axes
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "#666";
+
+    ctx.beginPath();
+    ctx.moveTo(0, originY);
+    ctx.lineTo(graph.width, originY);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(originX, 0);
+    ctx.lineTo(originX, +graph.height);
+    ctx.stroke();
+
+
+    // draw functions
+    // - determine the domain to use
+    var screenRight = (graph.width - originX)/pixelsPerUnit;
+    var screenLeft = (0 - originX)/pixelsPerUnit;
+    var numSamples = 100;
+    var sampleSpacing = (graph.width/pixelsPerUnit) / numSamples;
+    var domain = [];
+    for (var x=screenLeft; x<=screenRight+sampleSpacing; x+=sampleSpacing) {
+      domain.push(x);
+    }
+
+    // - draw individual functions
+    drawFunction(ctx, domain, x => x*x/10);
+    
+  }
+  redraw();
+  window.addEventListener('resize', redraw);
+
+
+  function drawFunction(ctx, domain, func) {
+    drawLine(ctx, domain, domain.map(func));
+  }
+  function drawLine(ctx, xs, ys) {
+    // xs and ys are in math coordinates.
+    // we need to draw them in pixel coordinates.
+    ctx.strokeStyle = "#00c";
+    ctx.beginPath();
+    ctx.moveTo(originX + pixelsPerUnit * xs[0],
+	       originY - pixelsPerUnit * ys[0]);
+    for (var i=1; i<xs.length; ++i) {
+      ctx.lineTo(originX + pixelsPerUnit * xs[i],
+		 originY - pixelsPerUnit * ys[i]);
+    }
+    ctx.stroke();
+  }
+  
 
 </script>
