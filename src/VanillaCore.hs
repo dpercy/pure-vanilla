@@ -69,6 +69,18 @@ data PrimFunc = OpIsEmpty
 allPrimops :: [PrimFunc]
 allPrimops = enumFrom minBound
 
+primName :: PrimFunc -> String
+primName OpIsEmpty = "isEmpty"
+primName OpIsCons = "isCons"
+primName OpFirst = "first"
+primName OpRest = "rest"
+primName OpIsTagged = "isTagged"
+primName OpUntag = "untag"
+primName OpPlus = "+"
+primName OpMinus = "-"
+primName OpTimes = "*"
+primName OpLessThan = "<"
+
 unop :: (Expr -> Expr) -> [Expr] -> Expr
 unop f [a] = f a
 unop _ [] = Error "not enough args"

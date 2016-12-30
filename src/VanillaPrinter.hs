@@ -130,18 +130,6 @@ showArgs env a = case parseExprList a of
   -- TODO indent??
   Just a' -> parens $ sep $ punctuate "," $ map (showExpr env) a'
 
-primName :: PrimFunc -> String
-primName OpIsEmpty = "isEmpty"
-primName OpIsCons = "isCons"
-primName OpFirst = "first"
-primName OpRest = "rest"
-primName OpIsTagged = "isTagged"
-primName OpUntag = "untag"
-primName OpPlus = "+"
-primName OpMinus = "-"
-primName OpTimes = "*"
-primName OpLessThan = "<"
-
 isId :: String -> Bool
 isId = and . map isIdChar
   where isIdChar c = isLetter c || isDigit c || c == '_'

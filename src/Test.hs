@@ -6,11 +6,13 @@ import qualified VanillaCore (test)
 import qualified VanillaParser (test)
 import qualified VanillaPrinter (test)
 import qualified VanillaServer (test)
+import qualified VanillaJS (test)
 
 import VanillaCore hiding (test, main)
 import VanillaParser hiding (test, main)
 import VanillaPrinter hiding (test, main)
 import VanillaServer hiding (test, main)
+import VanillaJS hiding (test, main)
 
 fromNext (Next e) = e
 
@@ -26,5 +28,6 @@ main = do
         , VanillaParser.test
         , VanillaPrinter.test
         , VanillaServer.test
+        , VanillaJS.test
         ]
   if ok then exitSuccess else exitFailure
