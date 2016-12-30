@@ -79,6 +79,25 @@
       }
     };
     xhr.send(defsWindow.value);
+
+
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", "/residualDefs", true);
+    xhr.onreadystatechange = function() {
+      if (xhr.readyState == 4) {
+        if (xhr.status == 200) {
+          // yay
+          console.log('residualDefs', xhr.responseText);
+	  eval("window.defs = " + xhr.responseText);
+        } else {
+          // error
+          console.log('residualDefs error', xhr.responseText);
+          defErrorsWindow.value = xhr.responseText;
+	  defErrorsWindow.hidden = false;
+        }
+      }
+    };
+    xhr.send();
   }
   defsWindow.addEventListener('keyup', redef);
 
