@@ -88,27 +88,31 @@
     };
     xhr.send(defsWindow.value);
 
+    getResidualDefs();
+  }
+  defsWindow.addEventListener('keyup', redef);
 
+  function getResidualDefs() {
     var xhr = new XMLHttpRequest();
     xhr.open("POST", "/residualDefs", true);
     xhr.onreadystatechange = function() {
       if (xhr.readyState == 4) {
-        if (xhr.status == 200) {
+	if (xhr.status == 200) {
           // yay
           console.log('residualDefs', xhr.responseText);
 	  eval("window.defs = " + xhr.responseText);
 	  redraw();
-        } else {
+	} else {
           // error
           console.log('residualDefs error', xhr.responseText);
           defErrorsWindow.value = xhr.responseText;
 	  defErrorsWindow.hidden = false;
-        }
+	}
       }
     };
     xhr.send();
   }
-  defsWindow.addEventListener('keyup', redef);
+  getResidualDefs();
 
   function requery() {
     if (queryWindow.value.trim() === '') {
@@ -200,10 +204,14 @@
     }
 
     // - draw individual functions
-    drawFunction(ctx, domain, x => x*x/10);
-    
+    Object.keys(window.defs).forEach(defName => {
+      var defValue = window.defs[defName];
+
+      if (typeof defValue === 'function') {
+	drawFunction(ctx, domain, defValue);
+      }
+    });
   }
-  redraw();
   window.addEventListener('resize', redraw);
 
 
