@@ -6,6 +6,7 @@ import VanillaCore
 import VanillaParser (program, expr)
 import Text.Parsec (parse)
 import VanillaPrinter (showExpr, toplevelEnv, showDefs)
+import VanillaJS (trResidualProgram)
 
 import Test.QuickCheck
 import Data.IORef
@@ -132,6 +133,11 @@ main = do
                       let env = toplevelEnv globals
                       return env
             text $ fromString $ show $ showExpr env result
+    post "/residualDefs" $ do
+      defs <- liftIO $ getDefs server
+      let defs' = evalDefs defs
+      text $ fromString $ trResidualProgram defs'
+
 
 requestTimeoutMicros :: Int
 requestTimeoutMicros = 1 * 1000 * 1000
