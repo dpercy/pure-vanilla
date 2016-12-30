@@ -35,6 +35,7 @@ data Server = Server { addDefs :: [Def] -> IO ()
                      , setDefs :: [Def] -> IO ()
                      , getDefs :: IO [Def]
                      , query :: Expr -> IO Expr
+                     , getResidualDefs :: IO [Def]
                      }
 
 update :: IORef a -> (a -> a) -> IO ()
@@ -75,7 +76,11 @@ mkServer = do
     getDefs = readIORef defsBox,
     query = \e -> do
       defs <- readIORef defsBox
-      runInDefs defs e (const $ return $ Error "unhandled effect")
+      runInDefs defs e (const $ return $ Error "unhandled effect"),
+    getResidualDefs = do
+      defs <- readIORef defsBox
+      let !defs' = evalDefs defs
+      return defs'
     }
 
 
@@ -134,9 +139,11 @@ main = do
                       return env
             text $ fromString $ show $ showExpr env result
     post "/residualDefs" $ do
-      defs <- liftIO $ getDefs server
-      let defs' = evalDefs defs
-      text $ fromString $ trResidualProgram defs'
+      defsOrTimeout <- liftIO $ timeout requestTimeoutMicros $ getResidualDefs server
+      case defsOrTimeout of
+       Nothing -> do status status400
+                     text $ fromString $ "Computation timed out"
+       Just defs' -> text $ fromString $ trResidualProgram defs'
 
 
 requestTimeoutMicros :: Int
