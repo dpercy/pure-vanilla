@@ -139,7 +139,7 @@ expr = "expression" & (lambda
 leaf = literal
        <|> Var `liftM` variable
        <|> try (Var `liftM` parens tok_op)  -- like (+)
-       <|> parens expr
+       <|> parens (between (optional tok_newline) (optional tok_newline) expr)
 factor = do head <- leaf
             -- TODO test curried calls like f(1)(2)
             call head <|> return head
@@ -181,7 +181,8 @@ lambda = do p <- try $ do p <- params
           param = variable <|> tok_op
 
 call :: Expr -> Parser Expr
-call callee = do args <- parens (expr `sepEndBy` tok_comma)
+call callee = do args <- parens (between (optional tok_newline) (optional tok_newline)
+                                 (expr `sepEndBy` (tok_comma >> optional tok_newline)))
                  return $ case callee of
                            Var op -> app op args
                            _ -> App callee (foldr Cons (Lit Null) args)
