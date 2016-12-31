@@ -64,8 +64,8 @@ addParams :: [String] -> Env -> ([String], Env)
 --      doesn't appear free in the body.
 addParams ps env =
   let (++) = appendNoCollide (globals env) in
-  let env' = env{ locals = ps ++ locals env } in
-  (take (length ps) (locals env'), env')
+  let env' = env{ locals = (reverse ps) ++ locals env } in
+  (reverse (take (length ps) (locals env')), env')
 
 lookupUpref :: Int -> Env -> String
 lookupUpref up env =
