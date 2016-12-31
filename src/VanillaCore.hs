@@ -187,7 +187,12 @@ split (Perform eff) = case split eff of
   Value -> Split Hole (Perform eff)
   Crash msg -> Crash msg
   Split ctx e -> Split (Perform0 ctx) e
-split (Cons h t) = splitHelper h t Cons0 Cons1 Value
+split (Cons h t) = splitHelper h t Cons0 Cons1 $ case t of
+  -- when h and t are both values, we have to do an additional check:
+  --   if t is not a list, then this call to cons has to be a redex (it will step to an error).
+  Lit Null -> Value
+  (Cons _ _) -> Value
+  _ -> Split Hole (Cons h t)
 split (Tag k v) = splitHelper k v Tag0 Tag1 Value
 split (Func _ _) = Value
 split (App f a) = splitHelper f a App0 App1 (Split Hole (App f a))
@@ -319,7 +324,11 @@ stepRoot (If (Lit (Bool True)) c _) = c
 stepRoot (If (Lit (Bool False)) _ a) = a
 stepRoot (If _ _ _) = Error "if-test must be a boolean"
 stepRoot (Lit _) = error "not a redex"
-stepRoot (Cons _ _) = error "not a redex"
+stepRoot (Cons _ t) = case t of
+  Lit Null -> error "not a redex"
+  Cons _ _ -> error "not a redex"
+  -- if the tail isn't a list, we step to an error
+  _ -> Error "cons a non-list"
 stepRoot (Tag _ _) = error "not a redex"
 stepRoot (Func _ _) = error "not a redex"
 stepRoot (Error _) = error "not a redex"
