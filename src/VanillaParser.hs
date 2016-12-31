@@ -142,7 +142,8 @@ leaf = literal
        <|> parens (between (optional tok_newline) (optional tok_newline) expr)
 factor = do head <- leaf
             -- TODO test curried calls like f(1)(2)
-            call head <|> return head
+            calls head
+              where calls head = (call head >>= calls) <|> return head
 arith = prefixOp <|> infixOrFactor
  where prefixOp = do op <- try tok_op
                      arg <- factor
@@ -262,6 +263,10 @@ prop_params =
 prop_call =
   pp "v = f(x, 1)"
   == [ Def "v" (App (Var "f") [(Var "x"), 1]) ]
+
+prop_call_curry =
+  pp "v = f(x, 1)()(y)"
+  == [ Def "v" (App (App (App (Var "f") [Var "x", 1]) []) [Var "y"]) ]
 
 prop_prefix =
   pp "f = () -> (- x)"
