@@ -204,7 +204,7 @@ letExpr = do keyword "let"
 ifExpr :: Parser Expr
 ifExpr = do keyword "if" ; t <- expr   ; optional tok_newline
             keyword "then" ; c <- expr ; optional tok_newline
-            keyword "else" ; e <- expr ; optional tok_newline
+            keyword "else" ; e <- expr
             return $ If t c e
 
 app :: String -> [Expr] -> Expr
