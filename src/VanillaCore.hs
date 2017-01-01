@@ -108,23 +108,29 @@ applyPrim OpUntag    = binop $ \k t -> case k of
                                            _ -> Error "untag arg must be a tagged value"
                                         _ -> Error "untag key must be a symbol"
 
-applyPrim OpPlus = binop $ \x y -> case (x, y) of
-  ((Lit (Num x)), (Lit (Num y))) -> Lit (Num (x + y))
-  _ -> Error "plus a non-integer"
--- minus is special: both a binop and unop
+applyPrim OpPlus = \args -> case parseNums args of
+  Nothing -> Error "plus a non-number"
+  Just ns -> Lit (Num (foldr (+) 0 ns))
 applyPrim OpMinus = \args -> case args of
   [] -> Error "not enough args"
   [(Lit (Num x))] -> Lit (Num (- x))
   [(Lit (Num x)), (Lit (Num y))] -> Lit (Num (x - y))
-  [_] -> Error "minus a non-integer"
-  [_, _] -> Error "minus a non-integer"
+  [_] -> Error "minus a non-number"
+  [_, _] -> Error "minus a non-number"
   _ -> Error "too many args"
-applyPrim OpTimes = binop $ \x y -> case (x, y) of
-  ((Lit (Num x)), (Lit (Num y))) -> Lit (Num (x * y))
-  _ -> Error "times a non-integer"
+applyPrim OpTimes = \args -> case parseNums args of
+  Nothing -> Error "times a non-number"
+  Just ns -> Lit (Num (foldr (*) 1 ns))
 applyPrim OpLessThan = binop $ \x y -> case (x, y) of
   ((Lit (Num x)), (Lit (Num y))) -> Lit (Bool (x < y))
-  _ -> Error "less-than a non-integer"
+  _ -> Error "less-than a non-number"
+
+parseNums :: [Expr] -> Maybe [Rational]
+parseNums args = case args of
+  [] -> Just []
+  ((Lit (Num x)):rest) -> do rest' <- parseNums rest
+                             Just (x:rest')
+  _ -> Nothing
 
 
 

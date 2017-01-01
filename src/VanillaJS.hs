@@ -55,8 +55,12 @@ trExpr env (Func params body) = concat [ "function("
 trExpr env e@(App f a) = case parseExprList a of
   Nothing -> noCase e
   Just a' -> case (f, a') of
-    -- special cases for operators
-    (Prim op, [x, y]) | primName op `elem` ["+", "-", "*", "<"] ->
+    -- any-arity operator
+    (Prim op, args) | primName op `elem` ["+", "*"] ->
+                        let args' = map (trExpr env) args in
+                        "(" ++ (concat $ intersperse (" " ++ primName op ++ " ") args') ++ ")"
+    -- binary operators
+    (Prim op, [x, y]) | primName op `elem` ["-", "<"] ->
                           concat [ "("
                                  , trExpr env x
                                  , " "
@@ -65,6 +69,7 @@ trExpr env e@(App f a) = case parseExprList a of
                                  , trExpr env y
                                  , ")"
                                  ]
+    -- unary operators
     (Prim OpMinus, [x]) -> "(- " ++ trExpr env x ++ ")"
     -- general case for function application
     _ -> trExpr env f ++ "(" ++ commas (map (trExpr env) a') ++ ")"

@@ -10,6 +10,7 @@ import Control.Monad
 import Data.Functor.Identity
 import Data.Char
 import Data.Ratio
+import GHC.Exts (fromList)
 
 {-
 
@@ -144,18 +145,19 @@ factor = do head <- leaf
             -- TODO test curried calls like f(1)(2)
             calls head
               where calls head = (call head >>= calls) <|> return head
-arith = prefixOp <|> infixOrFactor
+arith = prefixOp <|> infixes
  where prefixOp = do op <- try tok_op
                      arg <- factor
                      return $ app op [arg]
-       infixOrFactor = do e <- factor
-                          infixOp e <|> return e
-       infixOp arg0 = do op <- tok_op
-                         arg1 <- factor
-                         return $ app op [arg0, arg1]
-
-
-
+       infixes = do head <- factor
+                    tails <- many (do op <- tok_op
+                                      e <- factor
+                                      return (op, e))
+                    case tails of
+                     [] -> return head
+                     ((op, _):_) -> do guard $ all (== op) (map fst tails)
+                                       return $ app op (head:(map snd tails))
+                     _ -> error "unreachable (why does GHC not see this?)"
 
 literal :: Parser Expr
 literal = "literal" & (dec <|> frac <|> int <|> sym)
@@ -209,11 +211,11 @@ app :: String -> [Expr] -> Expr
 app "perform" [e] = Perform e
 app "cons" [x, y] = Cons x y
 app "tag" [x, y] = Tag x y
-app "+" [x, y] = App (Prim OpPlus) [x, y]
-app "-" [x, y] = App (Prim OpMinus) [x, y]
-app "-" [x] = App (Prim OpMinus) [x] -- minus has two cases
-app "*" [x, y] = App (Prim OpTimes) [x, y]
-app "<" [x, y] = App (Prim OpLessThan) [x, y]
+
+app "+" args = App (Prim OpPlus) (fromList args)
+app "-" args = App (Prim OpMinus) (fromList args)
+app "*" args = App (Prim OpTimes) (fromList args)
+app "<" args = App (Prim OpLessThan) (fromList args)
 -- TODO more cases for more ops
 app f a = App (Var f) (foldr Cons (Lit Null) a)
 
@@ -275,11 +277,11 @@ prop_prefix =
      ]
 
 prop_ops =
-  pp "f = (++, <|>) -> (<|> (1 ++ 2))"
+  pp "f = (++, <|>) -> (<|> (1 ++ 2 ++ 3))"
   == [ Def "f" (func ["++", "<|>"]
                 (App (Var "<|>")
                  [(App (Var "++")
-                   [1, 2])]))
+                   [1, 2, 3])]))
      ]
 
 prop_letin =
