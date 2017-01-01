@@ -71,6 +71,8 @@ tok_semicolon = token $ char ';'
 tok_newline = (many1 $ token $ char '\n') >> return '\n'
 tok_openParen = token $ char '('
 tok_closeParen = token $ char ')'
+tok_openBracket = token $ char '['
+tok_closeBracket = token $ char ']'
 tok_comma = token $ char ','
 tok_arrow = token $ string "->"
 tok_int :: Parser Integer
@@ -141,6 +143,10 @@ leaf = literal
        <|> Var `liftM` variable
        <|> try (Var `liftM` parens tok_op)  -- like (+)
        <|> parens (between (optional tok_newline) (optional tok_newline) expr)
+       <|> do tok_openBracket
+              tok_closeBracket
+              -- TODO a more-general list notation here
+              return (Lit Null)
 factor = do head <- leaf
             -- TODO test curried calls like f(1)(2)
             calls head
