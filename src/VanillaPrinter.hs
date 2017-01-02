@@ -81,6 +81,25 @@ showDefs defs = vcat $ intersperse "" $ map (showDef env) defs
 showDef :: Env -> Def -> Doc
 showDef env (Def x e) = hang 2 $ showId x <+> char '=' <+> showExpr env e
 
+se :: Env -> Expr -> Doc
+se env expr = wrap (showExpr env expr)
+  where wrap = case expr of
+                -- leaf expressions don't need parens
+                Upref _ -> id
+                Var _ -> id
+                Prim _ -> id
+                Lit _ -> id
+                -- constructor and effect calls don't need parens
+                Perform _ -> id
+                Cons _ _ -> id
+                Tag _ _ -> id
+                Error _ -> id
+               -- lambdas and ifs need parens: they're low-precedence right-associative
+                Func _ _ -> parens . align
+                If _ _ _ -> parens . align
+                -- function calls need parens in case they are an infix op
+                App _ _ -> parens . align
+
 showExpr :: Env -> Expr -> Doc
 showExpr env (Upref i) = showId (lookupUpref i env)
 showExpr _   (Var x) = showId x
@@ -92,43 +111,47 @@ showExpr _   (Lit (Num n)) = case denominator n of
   d -> text $ (show $ numerator n) ++ "/" ++ (show d)
 showExpr _   (Lit (String s)) = text (show s)
 showExpr _   (Lit (Symbol s)) = text (':':s)
-showExpr env (Perform eff) = "perform(" <> showExpr env eff <> ")"
-showExpr env (Cons hd tl) = "cons(" <> showExpr env hd <> ", " <> showExpr env tl <> ")"
-showExpr env (Tag k v) = "tag(" <> showExpr env k <> ", " <> showExpr env v <> ")"
+showExpr env (Perform eff) = "perform(" <> se env eff <> ")"
+showExpr env (Cons hd tl) = "cons(" <> se env hd <> ", " <> se env tl <> ")"
+showExpr env (Tag k v) = "tag(" <> se env k <> ", " <> se env v <> ")"
 showExpr env (Func params body) = hang 2 $ sep [ paramsDoc <+> "->", bodyDoc ]
   where (params', env') = addParams params env
         paramsDoc = parens $ sep $ punctuate "," $ map showId params'
-        bodyDoc = showExpr env' body
-showExpr env (App (Func [x] body) [e]) = sep [ hsep [ "let", showId x', "=", showExpr env e, "in" ]
-                                         , showExpr env' body
+        bodyDoc = se env' body
+showExpr env (App (Func [x] body) [e]) = sep [ hsep [ "let", showId x', "=", se env e, "in" ]
+                                         , se env' body
                                          ]
   where ([x'], env') = addParams [x] env
 showExpr env (App f a) = case f of
   Prim op -> showInfix env (primName op) a
   Var s | not (isId s) -> showInfix env s a
-  _ -> showExpr env f <> showArgs env a
+  _ -> se env f <> showArgs env a
         
-showExpr env (If t c a) = sep [ "if" <+> showExpr env t
-                          , "then" <+> showExpr env c
-                          , "else" <+> showExpr env a
+showExpr env (If t c a) = sep [ "if" <+> se env t
+                          , "then" <+> se env c
+                          , "else" <+> se env a
                           ]
 showExpr _   (Error msg) = "error(" <> text (show msg) <> ")"
 
 showInfix :: Env -> String -> Expr -> Doc
 showInfix env op a = case parseExprList a of
   Nothing -> text op <> showArgs env a
-  Just []  -> showExpr env (Var op) <> showArgs env a
-  Just [a0] -> text op <+> showExpr env a0
-  Just a' -> hsep $ intersperse (text op) (map (showExpr env) a')
+  Just []  -> se env (Var op) <> showArgs env a
+  Just [a0] -> text op <+> se env a0
+  Just (a0:aa) -> sep docs
+    where docs = a0':aa'
+          a0' = se env a0
+          aa' = zipWith (<+>) (repeat $ text op) (map (se env) aa)
+  Just _ -> error "unreachable - why doesn't GHC see this?"
+
 
 -- TODO use flatAlt to have a different representation when one line vs multiline
 ---- good for eliding the final comma only for single line
 ---- good for changing newlines into semicolons
 showArgs :: Env -> Expr -> Doc
 showArgs env a = case parseExprList a of
-  Nothing -> "(*" <> showExpr env a <> ")"
-  -- TODO indent??
-  Just a' -> parens $ sep $ punctuate "," $ map (showExpr env) a'
+  Nothing -> "(*" <> se env a <> ")"
+  Just a' -> parens $ align $ sep $ punctuate "," $ map (showExpr env) a'
 
 isId :: String -> Bool
 isId = and . map isIdChar
