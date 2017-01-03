@@ -3,8 +3,7 @@
 module VanillaServer where
 
 import VanillaCore
-import VanillaParser (program, expr)
-import Text.Parsec (parse)
+import VanillaParser (parseProgram, parseExpr)
 import VanillaPrinter (showExpr, showDefs)
 import VanillaJS (trResidualProgram)
 
@@ -102,7 +101,7 @@ main = do
       file "static/index.html"
     post "/addDefs" $ do
       s <- body
-      case parse program "<in>" (unpack s) of
+      case parseProgram (unpack s) of
        Left err -> do
          status status400
          text $ fromString $ "Parse error: " ++ show err
@@ -112,7 +111,7 @@ main = do
          text $ fromString $ show $ showDefs defs
     post "/setDefs" $ do
       s <- body
-      case parse program "<in>" (unpack s) of
+      case parseProgram (unpack s) of
        Left err -> do
          status status400
          text $ fromString $ "Parse error: " ++ show err
@@ -122,7 +121,7 @@ main = do
          text $ fromString $ show $ showDefs defs
     post "/query" $ do
       s <- body
-      case parse expr "<in>" (unpack s) of
+      case parseExpr (unpack s) of
        Left err -> do
          status status400
          text $ fromString $ "Parse error: " ++ show err

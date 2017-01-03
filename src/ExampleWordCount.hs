@@ -12,7 +12,7 @@ import System.IO.Error (catchIOError)
 import Str
 
 wc :: [Def]
-wc = parseProgram $ [str|
+wc = pp $ [str|
 
   main = () ->
     let v = loop(0) in

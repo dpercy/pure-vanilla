@@ -3,7 +3,7 @@
 module VanillaPrinter where
 
 import VanillaCore
-import VanillaParser (parseProgram)
+import VanillaParser (pp)
 import ExampleWordCount
 
 import Test.QuickCheck
@@ -131,7 +131,7 @@ showVar (Var x i) = if isId x then s
   where s = text (x ++ "'" ++ show i)
 
 prop_wc_reparse =
-  (parseProgram $ show $ showDefs wc)
+  (pp $ show $ showDefs wc)
   == wc
 
 -- scary quickCheck macros!

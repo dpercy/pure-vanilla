@@ -248,27 +248,30 @@ pp s = case parse program "<in>" s of
 
 fixScope :: [Def] -> [Def]
 fixScope = map fixDef
-  where fixDef (Def x e) = Def x (fixExpr emptyScope e)
-        fixExpr scope@(InScope sc) e =
-          let r = fixExpr (InScope sc) in
-          case e of
-           Local (Var x (-1)) -> case Map.lookup x sc of
-             Nothing -> Global x
-             Just i -> Local (Var x i)
-           Local (Var x i) -> Local (Var x i)
-           Func p b -> let (scope', p') = renameVars scope p in
-                        Func p' (fixExpr scope' b)
-           Global _ -> error "fixScope assumes all ids are Local"
-           Prim _ -> e
-           Lit _ -> e
-           Error _ -> e
-           Perform e0 -> Perform (r e0)
-           Cons e0 e1 -> Cons (r e0) (r e1)
-           Tag e0 e1 -> Tag (r e0) (r e1)
-           App e0 e1 -> App (r e0) (r e1)
-           If e0 e1 e2 -> If (r e0) (r e1) (r e2)
+  where fixDef (Def x e) = Def x (fixExprScope emptyScope e)
 
-parseProgram = pp
+fixExprScope scope@(InScope sc) e =
+  let r = fixExprScope (InScope sc) in
+   case e of
+    Local (Var x (-1)) -> case Map.lookup x sc of
+      Nothing -> Global x
+      Just i -> Local (Var x i)
+    Local (Var x i) -> Local (Var x i)
+    Func p b -> let (scope', p') = renameVars scope p in
+                 Func p' (fixExprScope scope' b)
+    Global _ -> error "fixScope assumes all ids are Local"
+    Prim _ -> e
+    Lit _ -> e
+    Error _ -> e
+    Perform e0 -> Perform (r e0)
+    Cons e0 e1 -> Cons (r e0) (r e1)
+    Tag e0 e1 -> Tag (r e0) (r e1)
+    App e0 e1 -> App (r e0) (r e1)
+    If e0 e1 e2 -> If (r e0) (r e1) (r e2)
+
+parseProgram s = fixScope `fmap` parse program "<in>" s
+
+parseExpr s = fixExprScope emptyScope `fmap` parse expr "<in>" s
 
 
 prop_empty =
