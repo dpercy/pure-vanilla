@@ -5,10 +5,13 @@ module VanillaCore where
 import Test.QuickCheck
 import qualified Data.Map as Map
 import Data.Map (Map)
+import qualified Data.Set as Set
+import Data.Set (Set)
 import GHC.Generics
 import GHC.Exts
 import Data.List (find)
 import Data.Void
+import Data.Maybe
 import Control.Monad.Writer
 
 
@@ -36,24 +39,102 @@ instance Fractional Atom where
   a / b = error $ "divide on non-Num Atom: " ++ (show a) ++ " / " ++ (show b)
 
 
-data Expr = Upref Int -- de bruijn index.
-            -- Note that uprefs use a fixed-size Int,
-            -- instead of an arbitrarily-sized Integer,
-            -- because 1. Haskell lists are indexed by Int
-            --         2. in practice you're limited by the address space anyway
-            --         3. God help you if your program's scope depth exceeds a ~30 bit Int!
-          | Var String
+data Expr = Local Var
+          | Global String
           | Prim PrimFunc
           | Lit Atom
           | Perform Expr -- an arbitrary value can be an effect
           | Cons Expr Expr
           | Tag Expr Expr
-          | Func [String] Expr
+          | Func [Var] Expr
           | App Expr Expr -- expr must evaluate to an argument-list
           | If Expr Expr Expr
           | Error String
           deriving (Eq, Show, Generic)
 
+data Var = Var String Integer
+         deriving (Eq, Ord, Show, Generic)
+
+-- inscope represents a set of in-scope Vars:
+-- it tracks the largest number-part of each name that is in scope.
+data InScope = InScope (Map String Integer)
+                deriving (Eq, Show, Generic)
+
+-- for in infix:  Map.lookup k m `fallback` x
+fallback :: Maybe a -> a -> a
+fallback = flip fromMaybe
+
+emptyScope = InScope Map.empty
+
+addToScope :: Var -> InScope -> InScope
+addToScope (Var x i) (InScope sc) = InScope $ Map.insert x newI sc
+  where newI = max i oldI
+        oldI = Map.lookup x sc `fallback` 0
+
+instance IsList InScope where
+  type Item InScope = Var
+  fromList = foldr addToScope emptyScope
+  toList = undefined
+
+renameVar :: InScope -> Var -> Var
+renameVar (InScope sc) v@(Var x i) = case Map.lookup x sc of
+  Nothing -> v 
+  Just max -> if i > max
+              then v
+              else Var x (max + 1)    
+
+renameVars :: InScope -> [Var] -> (InScope, [Var])
+renameVars sc [] = (sc, [])
+renameVars sc (v:vs) =
+  let v' = renameVar sc v in
+  let sc' = addToScope v' sc in
+  let (sc'', vs') = renameVars sc' vs in
+  (sc'', v':vs')
+renameVars _ _ = error "silly GHC; this case is unreachable!"
+
+subst :: InScope -> Expr -> Map Var Expr -> Expr
+subst scope term sub =
+  let recur term = subst scope term sub in
+   case term of
+    Local v -> Map.lookup v sub `fallback` term
+    Global _ -> term
+    Prim _ -> term
+    Lit _ -> term
+    Perform e -> Perform (recur e)
+    Cons e0 e1 -> Cons (recur e0) (recur e1)
+    Tag e0 e1 -> Tag (recur e0) (recur e1)
+    Func params body ->
+      -- rename parameters so they don't shadow anything in scope
+      let (scope', params') = renameVars scope params in
+       -- extend the env with parameter renamings
+       let newSubs = Map.union sub$ Map.fromList $ zip params (map Local params') in
+       let sub' = Map.union sub newSubs in
+       Func params' (subst scope' body sub')
+    App e0 e1 -> App (recur e0) (recur e1)
+    If e0 e1 e2 -> If (recur e0) (recur e1) (recur e2)
+    Error _ -> term
+
+-- convenience for subst when you don't want to specify the scope.
+-- the scope comes from the set of free variables in the range of the substitution.
+substTop :: Expr -> Map Var Expr -> Expr
+substTop term sub = subst scope term sub
+  where scope = fromList $ do
+          (_, e) <- Map.toList sub
+          fv <- Set.toList $ freeVars e
+          return fv
+
+freeVars :: Expr -> Set Var
+freeVars (Local v) = [v]
+freeVars (Func params body) = freeVars body `Set.difference` (fromList params)
+freeVars (Global _) = []
+freeVars (Prim _) = []
+freeVars (Lit _) = []
+freeVars (Error _) = []
+freeVars (Perform e) = freeVars e
+freeVars (Cons e0 e1   ) = Set.unions . map freeVars $ [e0, e1]
+freeVars (Tag  e0 e1   ) = Set.unions . map freeVars $ [e0, e1]
+freeVars (App  e0 e1   ) = Set.unions . map freeVars $ [e0, e1]
+freeVars (If   e0 e1 e2) = Set.unions . map freeVars $ [e0, e1, e2]
 
 data PrimFunc = OpIsEmpty
               | OpIsCons
@@ -185,8 +266,8 @@ data Split = Value
            | Split Context Expr
            deriving (Eq, Show)
 split :: Expr -> Split
-split (Upref _) = error "unreachable - split doesn't reach under binders"
-split (Var x) = Split Hole (Var x)
+split (Local _) = error "unreachable - split doesn't reach under binders"
+split (Global x) = Split Hole (Global x)
 split (Prim _) = Value
 split (Lit _) = Value
 split (Perform eff) = case split eff of
@@ -240,35 +321,6 @@ prop_split_ex2 =
   == (Split Hole (App 1 2))
 
 
--- convenience for writing functions without thinking about de bruijn indices.
-func :: [String] -> Expr -> Expr
-func ps body = Func ps (sub env body)
-  where env :: Map String Int
-        env = Map.fromList (zip ps (reverse [0..(length ps)-1]))
-        sub _(Upref i) = Upref i
-        sub env (Var x) = case Map.lookup x env of
-                                Nothing -> Var x
-                                Just i -> Upref i
-        sub _ (Prim op) = Prim op
-        sub _ (Lit v) = Lit v
-        sub env (Perform eff) = Perform (sub env eff)
-        sub env (Cons hd tl) = Cons (sub env hd) (sub env tl)
-        sub env (Tag k v) = Tag (sub env k) (sub env v)
-        sub env (Func ps body) = Func ps (sub (Map.map (+ (length ps)) env) body)
-        sub env (App f a) = App (sub env f) (sub env a)
-        sub env (If t c a) = If (sub env t) (sub env c) (sub env a)
-        sub _ (Error s) = Error s
-
-
-prop_func_example1 =
-  func ["x", "y"] [Var "x", Var "y", Var "z"]
-  == Func ["x", "y"] [Upref 1, Upref 0, Var "z"]
-
-prop_func_example2 =
-  func ["x"] (func ["y"] [Var "x", func ["x"] [Var "x", Var "y"]])
-  == Func ["x"] (Func ["y"] [Upref 1, Func ["x"] [Upref 0, Upref 1]])
-
-
 
 plug :: Context -> Expr -> Expr
 plug c v = case c of
@@ -298,8 +350,8 @@ step expr = case split expr of
 
 -- stepRoot assumes there is a redex at the root of the expr tree.
 stepRoot :: Expr -> Expr
-stepRoot (Upref _) = error "stepRoot can't handle up-refs"
-stepRoot (Var x) = Error ("unbound global: " ++ x)
+stepRoot (Local _) = error "stepRoot assumes locals have already been substituted"
+stepRoot (Global x) = Error ("unbound global: " ++ x)
 stepRoot (Prim _) = error "not a redex"
 stepRoot (Perform _) = error "stepRoot can't handle Perform"
 stepRoot (App (Prim op) args) = case parseExprList args of
@@ -308,23 +360,8 @@ stepRoot (App (Prim op) args) = case parseExprList args of
 stepRoot (App (Func params body) args) = case parseExprList args of
   Nothing -> Error "args must be a list"
   Just args -> if length params == length args
-               then sub startEnv body
+               then substTop body (Map.fromList $ zip params args)
                else Error "arity"
-    where startEnv :: Map Int Expr
-          startEnv = Map.fromList (zip (reverse [0..(length args)-1]) args)
-          sub env (Upref i) = case Map.lookup i env of
-                          Nothing -> Upref i
-                          Just expr -> expr
-          sub _ (Var x) = Var x
-          sub _ (Prim op) = Prim op
-          sub _ (Lit v) = Lit v
-          sub env (Perform eff) = Perform (sub env eff)
-          sub env (Cons hd tl) = Cons (sub env hd) (sub env tl)
-          sub env (Tag k v) = Tag (sub env k) (sub env v)
-          sub env (Func ps body) = Func ps (sub (Map.mapKeys (+ (length ps)) env) body)
-          sub env (App f a) = App (sub env f) (sub env a)
-          sub env (If t c a) = If (sub env t) (sub env c) (sub env a)
-          sub _ (Error s) = Error s
 stepRoot (App _ _) = Error "callee must be a function"
 stepRoot (If (Lit (Bool True)) c _) = c
 stepRoot (If (Lit (Bool False)) _ a) = a
@@ -346,15 +383,17 @@ evalExpr e = case step e of
   Yield c _ -> evalExpr (plug c (Error "unhandled effect at import time"))
 
 prop_evalExprExample =
-  (evalExpr (App (func ["x", "y", "z"]
-                  [Var "x", Var "z", Var "y"])
+  (evalExpr (App (Func [Var "x" 0, Var "y" 0, Var "z" 0]
+                  [Local (Var "x" 0), Local (Var "z" 0), Local (Var "y" 0)])
              [0, 1, 2]))
   == [0, 2, 1]
 
 prop_evalExprClosure =
-  (evalExpr (App (func ["x"] (func ["y"] [Var "x", Var "y"])) [3]))
-  == (func ["y"]
-      [3, Var "y"])
+  -- note that Var "y" 42 does not get renamed, because it doesn't need to be renamed,
+  -- because there is no other "y" above or below it in scope.
+  (evalExpr (App (Func [Var "x" 0] (Func [Var "y" 42] [Local (Var "x" 0), Local (Var "y" 42)])) [3]))
+  == (Func [Var "y" 42]
+      [3, Local (Var "y" 42)])
 
 
 -- A definition is done when it is a Value or an Error.
@@ -424,7 +463,7 @@ findActiveDef defs = case find (not . isDefDone) defs of
                -- Look up that def and check whether it's done.
                -- If it is done, this def is the active one (the global is the redex).
                -- If it's not done, continue the search at that def.
-               Split _ (Var g) -> case lookupDef g defs of
+               Split _ (Global g) -> case lookupDef g defs of
                  Nothing -> OneActive (Def name expr) -- missing other def means global steps to error
                  Just otherDefExpr ->
                    let otherDef = (Def g otherDefExpr) in
@@ -461,49 +500,49 @@ trace stepper init =
 
 prop_evalEmpty = evalDefs [] == []
 prop_evalEasy = checkSteps stepDefs [
-  [ Def "x" (App (Var "z") [42])
-  , Def "y" (Var "x")
-  , Def "z" (If (Lit $ Bool True) (func ["a"] [Var "a"]) 456)
+  [ Def "x" (App (Global "z") [42])
+  , Def "y" (Global "x")
+  , Def "z" (If (Lit $ Bool True) (Func [Var "a" 0] [Local (Var "a" 0)]) 456)
   ],
-  [ Def "x" (App (Var "z") [42])
-  , Def "y" (Var "x")
-  , Def "z" (func ["a"] [Var "a"])
+  [ Def "x" (App (Global "z") [42])
+  , Def "y" (Global "x")
+  , Def "z" (Func [Var "a" 0] [Local (Var "a" 0)])
   ],
-  [ Def "x" (App (func ["a"] [Var "a"]) [42])
-  , Def "y" (Var "x")
-  , Def "z" (func ["a"] [Var "a"])
+  [ Def "x" (App (Func [Var "a" 0] [Local (Var "a" 0)]) [42])
+  , Def "y" (Global "x")
+  , Def "z" (Func [Var "a" 0] [Local (Var "a" 0)])
   ],
   [ Def "x" [42]
-  , Def "y" (Var "x")
-  , Def "z" (func ["a"] [Var "a"])
+  , Def "y" (Global "x")
+  , Def "z" (Func [Var "a" 0] [Local (Var "a" 0)])
   ],
   [ Def "x" [42]
   , Def "y" [42]
-  , Def "z" (func ["a"] [Var "a"])
+  , Def "z" (Func [Var "a" 0] [Local (Var "a" 0)])
   ]
   ]
 
 prop_evalCycle = checkSteps stepDefs [
- [ Def "x" (App (Var "y") [42]) , Def "y" (If (Lit $ Bool True) (Var "x") 456)],
- [ Def "x" (App (Var "y") [42]) , Def "y" (Var "x")],
- [ Def "x" (Error "cyclic definition: x") , Def "y" (Var "x")],
+ [ Def "x" (App (Global "y") [42]) , Def "y" (If (Lit $ Bool True) (Global "x") 456)],
+ [ Def "x" (App (Global "y") [42]) , Def "y" (Global "x")],
+ [ Def "x" (Error "cyclic definition: x") , Def "y" (Global "x")],
  [ Def "x" (Error "cyclic definition: x") , Def "y" (Error "depends on a failed def: x")]
  ]
 
 -- Programs where a global reference is under a function parameter with the same name
--- are tricky, because there isn't a nice way to represent them using s-expressions.
--- We can't simply rule out this case at parse-time,
--- because a non-tricky program can step to a tricky one:
-prop_evalShadowVar =
+-- are ok, because we distinguish between Global and Local vars.
+-- This is especially important when this global-under-same-local case
+-- only occurs after the program steps (as opposed to being present in the source).
+prop_evalShadowGlobal =
   stepDefs [ Def "x" (Lit $ Num 7)
            , Def "y" (App
-                      (func ["v"] (func ["x"] (Var "v")))
-                      [(func [] (Var "x"))])
+                      (Func [Var "v" 0] (Func [Var "x" 0] (Local (Var "v" 0))))
+                      [(Func [] (Global "x"))])
            ]
   == Next [ Def "x" (Lit $ Num 7)
             -- Note the capitalized Func constructor:
-            -- this Var "x" doesn't refer to the parameter "x".
-          , Def "y" (Func ["x"] (Func [] (Var "x")))
+            -- this Global "x" doesn't refer to the parameter "x".
+          , Def "y" (Func [Var "x" 0] (Func [] (Global "x")))
           ]
 
 prop_evalPrim =
@@ -511,13 +550,15 @@ prop_evalPrim =
   == Next  [ Def "x" 7 ]
 
 prop_evenOdd = lookupDef "result" (evalDefs
-  [ Def "isEven" (func ["n"] (If (App (Prim OpLessThan) [Var "n", 1])
-                              (Lit $ Bool True)
-                              (App (Var "isOdd") [(App (Prim OpPlus) [-1, Var "n"])])))
-  , Def "isOdd" (func ["n"] (If (App (Prim OpLessThan) [Var "n", 1])
-                             (Lit $ Bool False)
-                             (App (Var "isEven") [(App (Prim OpPlus) [-1, Var "n"])])))
-  , Def "result" (App (Var "isEven") [5])
+  [ Def "isEven" (Func [Var "n" 0]
+                  (If (App (Prim OpLessThan) [Local (Var "n" 0), 1])
+                   (Lit $ Bool True)
+                   (App (Global "isOdd") [(App (Prim OpPlus) [-1, Local (Var "n" 0)])])))
+  , Def "isOdd" (Func [Var "n" 0]
+                 (If (App (Prim OpLessThan) [Local (Var "n" 0), 1])
+                  (Lit $ Bool False)
+                  (App (Global "isEven") [(App (Prim OpPlus) [-1, Local (Var "n" 0)])])))
+  , Def "result" (App (Global "isEven") [5])
   ])
   == Just (Lit $ Bool False)
 
@@ -527,17 +568,17 @@ prop_stepYield_ex1 =
   step (Cons 1 (Perform 2))
   == Yield (Cons1 1 Hole) (Perform 2)
 
-stepVar :: [Def] -> Expr -> Expr
-stepVar defs (Var g) = case lookupDef g defs of
+stepGlobal :: [Def] -> Expr -> Expr
+stepGlobal defs (Global g) = case lookupDef g defs of
   Nothing -> Error $ "depends on a missing def: " ++ g
   Just (Error _) -> Error $ "depends on a failed def: " ++ g
   Just e -> e
-stepVar _ _ = error "stepVar can only handle Var exprs"
+stepGlobal _ _ = error "stepGlobal can only handle Global exprs"
 
 stepInDefs :: [Def] -> Expr -> Step Context Expr
 stepInDefs defs expr =
   case split expr of
-     Split c (Var g) -> Next $ plug c $ stepVar defs (Var g)
+     Split c (Global g) -> Next $ plug c $ stepGlobal defs (Global g)
      _ -> step expr
 
 
@@ -548,7 +589,7 @@ runMain takes:
 And runs the computation, using the effect handler to handle any Yields that happen.
 -}
 runMain :: Monad m => [Def] -> (Expr -> m Expr) -> m Expr
-runMain defs handler = runInDefs defs (App (Var "main") []) handler
+runMain defs handler = runInDefs defs (App (Global "main") []) handler
 
 runInDefs :: Monad m => [Def] -> Expr -> (Expr -> m Expr) -> m Expr
 runInDefs defs expr handler = loop expr
