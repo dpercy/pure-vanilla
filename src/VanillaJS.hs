@@ -100,7 +100,6 @@ trAtom (Bool True) = "true"
 trAtom (Bool False) = "false"
 trAtom (Num n) = show (fromRational n :: Double)
 trAtom (String s) = show s
-trAtom (Symbol s) = "Symbol.for(" ++ show s ++ ")"
 
 
 prop_example =

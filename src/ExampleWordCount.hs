@@ -16,11 +16,11 @@ wc = pp $ [str|
 
   main = () ->
     let v = loop(0) in
-    let ignored = perform(tag(:write, v)) in
-    :ok
+    let ignored = perform(tag("write", v)) in
+    "ok"
 
   loop = (n) ->
-    let c = perform(:read) in
+    let c = perform("read") in
       if c < 0 then n
       else if c < 10 then loop(n)
       else if 10 < c then loop(n)
@@ -36,11 +36,11 @@ getOrd = (catchIOError (do
   
 
 handler :: Expr -> IO Expr
-handler (Perform (Lit (Symbol "read"))) = do
+handler (Perform (Lit (String "read"))) = do
   c <- getOrd
   return (Lit (Num $ fromInteger c))
 handler (Perform (Tag
-                  (Lit (Symbol "write"))
+                  (Lit (String "write"))
                   (Lit (Num n)))) = do
   putStrLn $ show n
   return (Lit $ String "ok")
@@ -48,6 +48,6 @@ handler _ = undefined "no handler for this effect"
 
 main :: IO ()
 main = do
-  Lit (Symbol "ok") <- runMain wc handler
+  Lit (String "ok") <- runMain wc handler
   return ()
 

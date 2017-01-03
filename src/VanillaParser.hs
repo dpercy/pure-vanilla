@@ -75,11 +75,14 @@ tok_id = token $ do
   -- HAX ALERT: use -1 as a sentinel everywhere to mean "unspecified numeric suffix".
   -- These variables will be fixed when we do fixScope.
   return $ Var (c:cs) (fromMaybe (-1) i)
-tok_sym = token $ char ':' >> many1 letter
 tok_op = token $ do
   cs <- many1 (oneOf "~!@#$%^&*-=+|\\<>/?")
   i <- maybeNumSuffix
   return $ Var cs (fromMaybe (-1) i)
+tok_str = token $ do char '"'
+                     s <- many (digit <|> letter) -- TODO actual strings
+                     char '"'
+                     return s
 tok_semicolon = token $ char ';'
 tok_newline = (many1 $ token $ char '\n') >> return '\n'
 tok_openParen = token $ char '('
@@ -183,15 +186,16 @@ arith = prefixOp <|> infixes
                      _ -> error "unreachable (why does GHC not see this?)"
 
 literal :: Parser Expr
-literal = "literal" & (dec <|> frac <|> int <|> sym)
+literal = "literal" & (dec <|> frac <|> int <|> str)
   where dec = "decimal" & do n <- try tok_decimal
                              return (Lit $ Num $ n)
         frac = "fraction" & do n <- try tok_ratio
                                return (Lit $ Num $ n)
         int = "integer" & do n <- try tok_int
                              return (Lit $ Num $ fromInteger n)
-        sym = "symbol" & do s <- tok_sym
-                            return (Lit $ Symbol s)
+        str = "string" & do s <- try tok_str
+                            return (Lit $ String s)
+                            
           
 
 lambda :: Parser Expr
@@ -278,9 +282,9 @@ prop_empty =
   pp "" == []
   
 prop_example =
-  pp " x = 1 ; y = :wut ; z = 1/2 ; q = 3.5"
+  pp " x = 1 ; y = \"wut\" ; z = 1/2 ; q = 3.5"
    == [ Def "x" 1
-      , Def "y" (Lit $ Symbol "wut")
+      , Def "y" (Lit $ String "wut")
       , Def "z" (1/2)
       , Def "q" 3.5
       ]

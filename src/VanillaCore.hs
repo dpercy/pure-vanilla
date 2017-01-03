@@ -22,7 +22,6 @@ data Atom = Null
           | Bool Bool
           | Num Rational
           | String String
-          | Symbol String
           deriving (Eq, Show, Generic)
 
 instance Num Atom where
@@ -185,9 +184,9 @@ applyPrim OpFirst    = unop $ \v -> case v of Cons a _ -> a ; _ -> Error "first 
 applyPrim OpRest     = unop $ \v -> case v of Cons _ b -> b ; _ -> Error "rest non-cons"
 applyPrim OpIsTagged = binop $ \k t -> Lit $ Bool $ case t of Tag k' _ -> k == k' ; _ -> False
 applyPrim OpUntag    = binop $ \k t -> case k of
-                                        Lit (Symbol s) ->
+                                        Lit (String s) ->
                                           case t of
-                                           Tag (Lit (Symbol s')) v ->
+                                           Tag (Lit (String s')) v ->
                                              if s == s'
                                              then v
                                              else Error "untag key mismatch"
@@ -609,12 +608,12 @@ runInDefs defs expr handler = loop expr
 testHandler :: Expr -> Writer String Expr
 testHandler (Perform (Lit (String s))) = do
   tell s
-  return (Lit $ Symbol "ok")
+  return (Lit $ String "ok")
 testHandler _ = return $ Error "testHandler can't handle this effect"
 
 prop_runMain_ex1 =
   runWriter (runMain [ Def "main" (Func [] (Perform (Lit $ String "hi"))) ] testHandler)
-  == ((Lit $ Symbol "ok"), "hi")
+  == ((Lit $ String "ok"), "hi")
 
 -- scary quickCheck macros!
 -- see haskell docs for quickCheckAll

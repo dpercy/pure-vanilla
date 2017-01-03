@@ -78,7 +78,6 @@ showExpr (Lit (Num n)) = case denominator n of
   1 -> text $ (show $ numerator n)
   d -> text $ (show $ numerator n) ++ "/" ++ (show d)
 showExpr (Lit (String s)) = text (show s)
-showExpr (Lit (Symbol s)) = text (':':s)
 showExpr (Perform eff) = "perform(" <> se eff <> ")"
 showExpr (Cons hd tl) = "cons(" <> se hd <> ", " <> se tl <> ")"
 showExpr (Tag k v) = "tag(" <> se k <> ", " <> se v <> ")"
