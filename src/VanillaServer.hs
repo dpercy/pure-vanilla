@@ -5,7 +5,7 @@ module VanillaServer where
 import VanillaCore
 import VanillaParser (program, expr)
 import Text.Parsec (parse)
-import VanillaPrinter (showExpr, toplevelEnv, showDefs)
+import VanillaPrinter (showExpr, showDefs)
 import VanillaJS (trResidualProgram)
 
 import Test.QuickCheck
@@ -19,11 +19,13 @@ import Data.String (fromString)
 import System.Timeout
 
 instance Aeson.FromJSON PrimFunc
+instance Aeson.FromJSON Var
 instance Aeson.FromJSON Atom
 instance Aeson.FromJSON Expr
 instance Aeson.FromJSON Def
 
 instance Aeson.ToJSON PrimFunc
+instance Aeson.ToJSON Var
 instance Aeson.ToJSON Atom
 instance Aeson.ToJSON Expr
 instance Aeson.ToJSON Def
@@ -130,14 +132,7 @@ main = do
           Nothing -> do status status400
                         text $ fromString $ "Computation timed out"
           Just result -> do
-            -- Which env should we use to render the result?
-            -- It has to be one constructed from the definitions window.
-            -- The expression might evaluate to a lambda, which can refer to globals.
-            env <- do defs <- liftIO $ getDefs server -- for scoping
-                      let globals = map (\(Def x _) -> x) defs
-                      let env = toplevelEnv globals
-                      return env
-            text $ fromString $ show $ showExpr env result
+            text $ fromString $ show $ showExpr result
     post "/residualDefs" $ do
       defsOrTimeout <- liftIO $ timeout requestTimeoutMicros $ getResidualDefs server
       case defsOrTimeout of

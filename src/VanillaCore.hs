@@ -78,7 +78,12 @@ instance IsList InScope where
 
 renameVar :: InScope -> Var -> Var
 renameVar (InScope sc) v@(Var x i) = case Map.lookup x sc of
-  Nothing -> v 
+  Nothing -> if i > 0
+             then v
+                  --- HAX ALERT: ensure that the result of renameVar always
+                  -- has a positive number.
+                  -- This allows us to use (-1) as an unreadable sentinel.
+             else Var x 0
   Just max -> if i > max
               then v
               else Var x (max + 1)    

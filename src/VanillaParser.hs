@@ -10,6 +10,7 @@ import Control.Monad
 import Data.Functor.Identity
 import Data.Char
 import Data.Ratio
+import Data.Maybe
 import qualified Data.Map as Map
 import GHC.Exts (fromList)
 
@@ -59,15 +60,26 @@ token p = do
   spaces
   return v
 
+maybeNumSuffix :: Parser (Maybe Integer)
+maybeNumSuffix = optionMaybe $ try $ do char '\''
+                                        ds <- many1 digit
+                                        return (read ds :: Integer)
+
 tok_equals = token $ char '='
 tok_id = token $ do
   let starter = letter <|> oneOf "_"
   let mid = starter <|> digit
   c <- starter
   cs <- many mid
-  return (c:cs)
+  i <- maybeNumSuffix
+  -- HAX ALERT: use -1 as a sentinel everywhere to mean "unspecified numeric suffix".
+  -- These variables will be fixed when we do fixScope.
+  return $ Var (c:cs) (fromMaybe (-1) i)
 tok_sym = token $ char ':' >> many1 letter
-tok_op = token $ many1 (oneOf "~!@#$%^&*-=+|\\<>/?")
+tok_op = token $ do
+  cs <- many1 (oneOf "~!@#$%^&*-=+|\\<>/?")
+  i <- maybeNumSuffix
+  return $ Var cs (fromMaybe (-1) i)
 tok_semicolon = token $ char ';'
 tok_newline = (many1 $ token $ char '\n') >> return '\n'
 tok_openParen = token $ char '('
@@ -99,23 +111,25 @@ program = "program" & do
 
 def :: Parser Def
 def = "definition" & do
-  lhs <- variable
+  Var x i <- variable
+  guard (i == -1)
   tok_equals
   optional tok_newline
-  rhs <- expr
-  return $ Def lhs rhs
+  e <- expr
+  return $ Def x e
 
-variable :: Parser String
+variable :: Parser Var
 variable = try $ do
-  v <- tok_id
-  guard (not $ v `elem` keywords)
+  v@(Var name _) <- tok_id
+  guard (not $ name `elem` keywords)
   return v
 
 keyword :: String -> Parser String
 keyword kw = try $ do
-  v <- tok_id
-  guard (v == kw)
-  return v
+  Var x i <- tok_id
+  guard (i == -1)
+  guard (x == kw)
+  return x
 
 keywords :: [String]
 keywords = [ "let", "in", "if", "then", "else" ]
@@ -142,9 +156,9 @@ expr = "expression" & (lambda
 -- The same problem affects if-expressions and let-expressions.
 leaf = literal
        <|> do v <- variable
-              return $ Local (Var v 0)
+              return $ Local v
        <|> do op <- try $ parens tok_op
-              return $ Local (Var op 0)
+              return $ Local op
        <|> parens (between (optional tok_newline) (optional tok_newline) expr)
        <|> do tok_openBracket
               tok_closeBracket
@@ -188,14 +202,14 @@ lambda = do p <- try $ do p <- params
             e <- expr
             return $ Func p e
     where params = parens (param `sepEndBy` tok_comma)
-          param = do v <- variable <|> tok_op
-                     return $ Var v 0
+          param :: Parser Var
+          param = variable <|> tok_op
 
 call :: Expr -> Parser Expr
 call callee = do args <- parens (between (optional tok_newline) (optional tok_newline)
                                  (expr `sepEndBy` (tok_comma >> optional tok_newline)))
                  return $ case callee of
-                           Local (Var op _) -> app op args
+                           Local op -> app op args
                            _ -> App callee (foldr Cons (Lit Null) args)
 
 letExpr :: Parser Expr
@@ -205,7 +219,7 @@ letExpr = do keyword "let"
              e <- expr
              keyword "in" ; optional tok_newline
              b <- expr
-             return $ (App (Func [Var v 0] b) [e])
+             return $ (App (Func [v] b) [e])
 
 -- since the else part is mandatory,
 -- there should be no ambiguity when nesting ifs.
@@ -215,17 +229,17 @@ ifExpr = do keyword "if" ; t <- expr   ; optional tok_newline
             keyword "else" ; e <- expr
             return $ If t c e
 
-app :: String -> [Expr] -> Expr
-app "perform" [e] = Perform e
-app "cons" [x, y] = Cons x y
-app "tag" [x, y] = Tag x y
+app :: Var -> [Expr] -> Expr
+app (Var "perform" (-1)) [e] = Perform e
+app (Var "cons" (-1)) [x, y] = Cons x y
+app (Var "tag" (-1)) [x, y] = Tag x y
 
-app "+" args = App (Prim OpPlus) (fromList args)
-app "-" args = App (Prim OpMinus) (fromList args)
-app "*" args = App (Prim OpTimes) (fromList args)
-app "<" args = App (Prim OpLessThan) (fromList args)
+app (Var "+" (-1)) args = App (Prim OpPlus) (fromList args)
+app (Var "-" (-1)) args = App (Prim OpMinus) (fromList args)
+app (Var "*" (-1)) args = App (Prim OpTimes) (fromList args)
+app (Var "<" (-1)) args = App (Prim OpLessThan) (fromList args)
 -- TODO more cases for more ops
-app f a = App (Local (Var f 0)) (foldr Cons (Lit Null) a)
+app f a = App (Local f) (foldr Cons (Lit Null) a)
 
 pp :: String -> [Def]
 pp s = case parse program "<in>" s of
@@ -238,9 +252,10 @@ fixScope = map fixDef
         fixExpr scope@(InScope sc) e =
           let r = fixExpr (InScope sc) in
           case e of
-           Local (Var x _) -> case Map.lookup x sc of
+           Local (Var x (-1)) -> case Map.lookup x sc of
              Nothing -> Global x
              Just i -> Local (Var x i)
+           Local (Var x i) -> Local (Var x i)
            Func p b -> let (scope', p') = renameVars scope p in
                         Func p' (fixExpr scope' b)
            Global _ -> error "fixScope assumes all ids are Local"
