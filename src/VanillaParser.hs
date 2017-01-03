@@ -5,11 +5,12 @@ module VanillaParser where
 import VanillaCore
 
 import Test.QuickCheck
-import Text.Parsec hiding (token, space, spaces, newline)
+import Text.Parsec hiding (token, space, spaces, newline, Error)
 import Control.Monad
 import Data.Functor.Identity
 import Data.Char
 import Data.Ratio
+import qualified Data.Map as Map
 import GHC.Exts (fromList)
 
 {-
@@ -140,8 +141,10 @@ expr = "expression" & (lambda
 -- could be read as either () -> (1 + 2) or (() -> 1) + 2.
 -- The same problem affects if-expressions and let-expressions.
 leaf = literal
-       <|> Var `liftM` variable
-       <|> try (Var `liftM` parens tok_op)  -- like (+)
+       <|> do v <- variable
+              return $ Local (Var v 0)
+       <|> do op <- try $ parens tok_op
+              return $ Local (Var op 0)
        <|> parens (between (optional tok_newline) (optional tok_newline) expr)
        <|> do tok_openBracket
               tok_closeBracket
@@ -183,17 +186,16 @@ lambda = do p <- try $ do p <- params
                           optional tok_newline
                           return p
             e <- expr
-            -- Use the 'func' smart constructor to convert
-            -- Vars to Uprefs (de bruijn indices)
-            return $ func p e
+            return $ Func p e
     where params = parens (param `sepEndBy` tok_comma)
-          param = variable <|> tok_op
+          param = do v <- variable <|> tok_op
+                     return $ Var v 0
 
 call :: Expr -> Parser Expr
 call callee = do args <- parens (between (optional tok_newline) (optional tok_newline)
                                  (expr `sepEndBy` (tok_comma >> optional tok_newline)))
                  return $ case callee of
-                           Var op -> app op args
+                           Local (Var op _) -> app op args
                            _ -> App callee (foldr Cons (Lit Null) args)
 
 letExpr :: Parser Expr
@@ -203,7 +205,7 @@ letExpr = do keyword "let"
              e <- expr
              keyword "in" ; optional tok_newline
              b <- expr
-             return $ (App (func [v] b) [e])
+             return $ (App (Func [Var v 0] b) [e])
 
 -- since the else part is mandatory,
 -- there should be no ambiguity when nesting ifs.
@@ -223,12 +225,33 @@ app "-" args = App (Prim OpMinus) (fromList args)
 app "*" args = App (Prim OpTimes) (fromList args)
 app "<" args = App (Prim OpLessThan) (fromList args)
 -- TODO more cases for more ops
-app f a = App (Var f) (foldr Cons (Lit Null) a)
+app f a = App (Local (Var f 0)) (foldr Cons (Lit Null) a)
 
 pp :: String -> [Def]
 pp s = case parse program "<in>" s of
   Left err -> error $ show err
-  Right v -> v
+  Right v -> fixScope v
+
+fixScope :: [Def] -> [Def]
+fixScope = map fixDef
+  where fixDef (Def x e) = Def x (fixExpr emptyScope e)
+        fixExpr scope@(InScope sc) e =
+          let r = fixExpr (InScope sc) in
+          case e of
+           Local (Var x _) -> case Map.lookup x sc of
+             Nothing -> Global x
+             Just i -> Local (Var x i)
+           Func p b -> let (scope', p') = renameVars scope p in
+                        Func p' (fixExpr scope' b)
+           Global _ -> error "fixScope assumes all ids are Local"
+           Prim _ -> e
+           Lit _ -> e
+           Error _ -> e
+           Perform e0 -> Perform (r e0)
+           Cons e0 e1 -> Cons (r e0) (r e1)
+           Tag e0 e1 -> Tag (r e0) (r e1)
+           App e0 e1 -> App (r e0) (r e1)
+           If e0 e1 e2 -> If (r e0) (r e1) (r e2)
 
 parseProgram = pp
 
@@ -262,38 +285,38 @@ prop_only_newlines =
 
 prop_func =
   pp "v = (x) -> cons(x, y)"
-  == [ Def "v" (func ["x"] (Cons (Var "x") (Var "y"))) ]
+  == [ Def "v" (Func [Var "x" 0] (Cons (Local (Var "x" 0)) (Global "y"))) ]
 
 prop_params =
   pp "f = (x, y, ++) -> 1"
-  == [ Def "f" (func ["x", "y", "++"] 1) ]
+  == [ Def "f" (Func [Var "x" 0, Var "y" 0, Var "++" 0] 1) ]
 
 prop_call =
   pp "v = f(x, 1)"
-  == [ Def "v" (App (Var "f") [(Var "x"), 1]) ]
+  == [ Def "v" (App (Global "f") [(Global "x"), 1]) ]
 
 prop_call_curry =
   pp "v = f(x, 1)()(y)"
-  == [ Def "v" (App (App (App (Var "f") [Var "x", 1]) []) [Var "y"]) ]
+  == [ Def "v" (App (App (App (Global "f") [Global "x", 1]) []) [Global "y"]) ]
 
 prop_prefix =
   pp "f = () -> (- x)"
-  == [  Def "f" (func []
-                 (App (Prim OpMinus) [Var "x"]))
+  == [  Def "f" (Func []
+                 (App (Prim OpMinus) [Global "x"]))
      ]
 
 prop_ops =
   pp "f = (++, <|>) -> (<|> (1 ++ 2 ++ 3))"
-  == [ Def "f" (func ["++", "<|>"]
-                (App (Var "<|>")
-                 [(App (Var "++")
+  == [ Def "f" (Func [Var "++" 0, Var "<|>" 0]
+                (App (Local (Var "<|>" 0))
+                 [(App (Local (Var "++" 0))
                    [1, 2, 3])]))
      ]
 
 prop_letin =
   pp "v = let x = 1 in (x + 2)"
-  == [ Def "v" (App (func ["x"] (App (Prim OpPlus)
-                                 [Var "x", 2]))
+  == [ Def "v" (App (Func [Var "x" 0] (App (Prim OpPlus)
+                                       [Local (Var "x" 0), 2]))
                 [1]) ]
 
 prop_special_functions =
@@ -314,12 +337,15 @@ prop_if_has_lower_precedence_than_infix =
 
 prop_if_has_lower_precedence_than_apply =
   pp "v = if 1 then 2 else f(3)"
-  == [ Def "v" (If 1 2 (App (Var "f") [3])) ]
+  == [ Def "v" (If 1 2 (App (Global "f") [3])) ]
 
 prop_if_has_lower_precedence_than_apply_then_infix =
   pp "v = if 1 then 2 else 3(4) + 5"
   == [ Def "v" (If 1 2 (App (Prim OpPlus) [App 3 [4], 5])) ]
 
+prop_shadow =
+  pp "f = (x) -> (x) -> x"
+  == [ Def "f" (Func [Var "x" 0] (Func [Var "x" 1] (Local (Var "x" 1)))) ]
 
 -- scary quickCheck macros!
 -- see haskell docs for quickCheckAll

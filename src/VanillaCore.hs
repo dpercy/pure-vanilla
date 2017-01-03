@@ -58,7 +58,7 @@ data Var = Var String Integer
 -- inscope represents a set of in-scope Vars:
 -- it tracks the largest number-part of each name that is in scope.
 data InScope = InScope (Map String Integer)
-                deriving (Eq, Show, Generic)
+             deriving (Eq, Show, Generic)
 
 -- for in infix:  Map.lookup k m `fallback` x
 fallback :: Maybe a -> a -> a
