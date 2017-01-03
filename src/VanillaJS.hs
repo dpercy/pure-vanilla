@@ -26,6 +26,8 @@ import Test.QuickCheck
 import Data.List
 
 
+nameVar (Var x i) = "_" ++ x ++ "_" ++ show i
+
 -- It is the caller's responsibility to only pass a fully-evaluated set of defs.
 -- Returns a JS expression that evaluates to an object with a property for each def.
 trResidualProgram :: [Def] -> String
@@ -35,54 +37,53 @@ trResidualProgram defs = "(function() {\n" ++ body ++ exports ++ "})()\n"
         mkexport (Def x _) = x ++ ": " ++ x ++ ",\n"
 
 trDef :: Def -> String
-trDef (Def x e) = "var " ++ x ++ " = " ++ trExpr [] e ++ ";\n"
+trDef (Def x e) = "var " ++ x ++ " = " ++ trExpr e ++ ";\n"
 
-trExpr :: [String] -> Expr -> String
--- TODO share shadow-avoiding code with VanillaPrinter
-trExpr env (Upref i) = env !! i
-trExpr _ (Var s) = s
-trExpr _ (Lit v) = trAtom v
-trExpr _ e@(Perform _) = noCase e
-trExpr _ e@(Cons _ _) = noCase e
-trExpr _ e@(Tag _ _) = noCase e
-trExpr env (Func params body) = concat [ "function("
-                                        , commas params
-                                        , ") { return "
-                                        , trExpr env' body
-                                        , "; }"
-                                        ]
-  where env' = reverse params ++ env
-trExpr env e@(App f a) = case parseExprList a of
+
+trExpr :: Expr -> String
+trExpr (Local v) = nameVar v
+trExpr (Global s) = s -- TODO avoid collision with Local
+trExpr (Lit v) = trAtom v
+trExpr e@(Perform _) = noCase e
+trExpr e@(Cons _ _) = noCase e
+trExpr e@(Tag _ _) = noCase e
+trExpr (Func params body) = concat [ "function("
+                                       , commas (map nameVar params)
+                                       , ") { return "
+                                       , trExpr body
+                                       , "; }"
+                                       ]
+trExpr e@(App f a) = case parseExprList a of
   Nothing -> noCase e
   Just a' -> case (f, a') of
     -- any-arity operator
     (Prim op, args) | primName op `elem` ["+", "*"] ->
-                        let args' = map (trExpr env) args in
+                        let args' = map trExpr args in
                         "(" ++ (concat $ intersperse (" " ++ primName op ++ " ") args') ++ ")"
     -- binary operators
     (Prim op, [x, y]) | primName op `elem` ["-", "<"] ->
                           concat [ "("
-                                 , trExpr env x
+                                 , trExpr x
                                  , " "
                                  , primName op
                                  , " "
-                                 , trExpr env y
+                                 , trExpr y
                                  , ")"
                                  ]
     -- unary operators
-    (Prim OpMinus, [x]) -> "(- " ++ trExpr env x ++ ")"
+    (Prim OpMinus, [x]) -> "(- " ++ trExpr x ++ ")"
     -- general case for function application
-    _ -> trExpr env f ++ "(" ++ commas (map (trExpr env) a') ++ ")"
-trExpr _ e@(Prim _) = noCase e
-trExpr env(If t c a) = concat [ "("
-                              , trExpr env t
-                              , " ? "
-                              , trExpr env c
-                              , " : "
-                              , trExpr env a
-                              , ")"
-                              ]
-trExpr _ (Error msg) = err msg
+    _ -> trExpr f ++ "(" ++ commas (map trExpr a') ++ ")"
+trExpr e@(Prim _) = noCase e
+trExpr (If t c a) = concat [ "("
+                           , trExpr t
+                           , " ? "
+                           , trExpr c
+                           , " : "
+                           , trExpr a
+                           , ")"
+                           ]
+trExpr (Error msg) = err msg
 
 commas :: [String] -> String
 commas = concat . intersperse ", "
@@ -103,9 +104,9 @@ trAtom (Symbol s) = "Symbol.for(" ++ show s ++ ")"
 
 
 prop_example =
-  trResidualProgram [Def "f" (func ["x"] (App (Prim OpPlus) (Cons (Var "x") (Cons 3 (Lit Null)))))]
+  trResidualProgram [Def "f" (Func [Var "x" 0] (App (Prim OpPlus) (Cons (Local (Var "x" 0)) (Cons 3 (Lit Null)))))]
   == unlines [ "(function() {"
-             , "var f = function(x) { return (x + 3.0); };"
+             , "var f = function(_x_0) { return (_x_0 + 3.0); };"
              , "return {"
              , "f: f,"
              , "};"
