@@ -103,6 +103,8 @@ tok_decimal = token $ do realPart <- many1 digit
                          char '.'
                          fracPart <- many1 digit
                          return $ (fromInteger $ read realPart) + (read fracPart % 10 ^ length fracPart)
+tok_colon = token $ char ':'
+
 parens = between tok_openParen tok_closeParen
 
 program :: Parser [Def]
@@ -140,6 +142,7 @@ keywords = [ "let", "in", "if", "then", "else" ]
 
 expr :: Parser Expr
 expr = "expression" & (lambda
+                       <|> quoteExpr
                        <|> letExpr
                        <|> ifExpr
                        <|> arith
@@ -216,6 +219,11 @@ call callee = do args <- parens (between (optional tok_newline) (optional tok_ne
                            Local op -> app op args
                            _ -> App callee (foldr Cons (Lit Null) args)
 
+quoteExpr :: Parser Expr
+quoteExpr = do tok_colon
+               stx <- leaf
+               return $ Quote stx
+
 letExpr :: Parser Expr
 letExpr = do keyword "let"
              v <- variable
@@ -267,6 +275,9 @@ fixExprScope scope@(InScope sc) e =
     Prim _ -> e
     Lit _ -> e
     Error _ -> e
+    -- TODO enforce here my assumption that quoted syntax does not contain free variables.
+    --- but remember that once you take-apart a syntax, it can become open...
+    Quote stx -> Quote (fixExprScope emptyScope stx)
     Perform e0 -> Perform (r e0)
     Cons e0 e1 -> Cons (r e0) (r e1)
     Tag e0 e1 -> Tag (r e0) (r e1)
@@ -368,6 +379,10 @@ prop_if_has_lower_precedence_than_apply_then_infix =
 prop_shadow =
   pp "f = (x) -> (x) -> x"
   == [ Def "f" (Func [Var "x" 0] (Func [Var "x" 1] (Local (Var "x" 1)))) ]
+
+prop_quote =
+  pp "stx = :( (x) -> x )"
+  == [ Def "stx" (Quote (Func [Var "x" 0] (Local (Var "x" 0)))) ]
 
 -- scary quickCheck macros!
 -- see haskell docs for quickCheckAll

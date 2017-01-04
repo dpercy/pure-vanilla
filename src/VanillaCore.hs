@@ -49,6 +49,7 @@ data Expr = Local Var
           | App Expr Expr -- expr must evaluate to an argument-list
           | If Expr Expr Expr
           | Error String
+          | Quote Expr
           deriving (Eq, Show, Generic)
 
 data Var = Var String Integer
@@ -117,6 +118,11 @@ subst scope term sub =
     App e0 e1 -> App (recur e0) (recur e1)
     If e0 e1 e2 -> If (recur e0) (recur e1) (recur e2)
     Error _ -> term
+    -- TODO what should happen when a quoted term refers to a parameter?
+    --  - prevent that situation in the first place?
+    --  - subst through the quote?
+    --    - is this equivalent to quasiquoting??
+    Quote _ -> term
 
 -- convenience for subst when you don't want to specify the scope.
 -- the scope comes from the set of free variables in the range of the substitution.
@@ -134,6 +140,7 @@ freeVars (Global _) = []
 freeVars (Prim _) = []
 freeVars (Lit _) = []
 freeVars (Error _) = []
+freeVars (Quote _) = []
 freeVars (Perform e) = freeVars e
 freeVars (Cons e0 e1   ) = Set.unions . map freeVars $ [e0, e1]
 freeVars (Tag  e0 e1   ) = Set.unions . map freeVars $ [e0, e1]
@@ -292,6 +299,7 @@ split (If test consq alt) = case split test of
   Crash msg -> Crash msg
   Split ctx e -> Split (If0 ctx consq alt) e
 split (Error msg) = Crash msg
+split (Quote _) = Value
 
 splitHelper :: Expr
             -> Expr
@@ -379,6 +387,7 @@ stepRoot (Cons _ t) = case t of
 stepRoot (Tag _ _) = error "not a redex"
 stepRoot (Func _ _) = error "not a redex"
 stepRoot (Error _) = error "not a redex"
+stepRoot (Quote _) = error "not a redex"
 
 evalExpr :: Expr -> Expr
 evalExpr e = case step e of

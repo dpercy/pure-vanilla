@@ -62,6 +62,7 @@ se expr = wrap (showExpr expr)
                 Cons _ _ -> id
                 Tag _ _ -> id
                 Error _ -> id
+                Quote _ -> id
                -- lambdas and ifs need parens: they're low-precedence right-associative
                 Func _ _ -> parens . align
                 If _ _ _ -> parens . align
@@ -95,6 +96,7 @@ showExpr (If t c a) = sep [ "if" <+> se t
                           , "else" <+> se a
                           ]
 showExpr (Error msg) = "error(" <> text (show msg) <> ")"
+showExpr (Quote stx) = ":(" <> showExpr stx <> ")"
 
 showInfix :: String -> Expr -> Doc
 showInfix op a = case parseExprList a of

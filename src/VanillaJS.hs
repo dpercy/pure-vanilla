@@ -84,6 +84,7 @@ trExpr (If t c a) = concat [ "("
                            , ")"
                            ]
 trExpr (Error msg) = err msg
+trExpr (Quote stx) = err $ "don't know how to compile quoted syntax: " ++ show stx
 
 commas :: [String] -> String
 commas = concat . intersperse ", "
