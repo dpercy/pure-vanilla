@@ -1,0 +1,58 @@
+# http://adventofcode.com/2016/day/1
+
+main = (input) ->
+  measure(interp(initialState, parse(input)))
+
+measure = (state) ->
+  abs(first(state)) + abs(first(rest(state)))
+
+abs = (n) -> 
+  if n < 0
+  then (- n)
+  else n
+
+initialState = [0, 0, "N"]
+
+# note foldl uses Haskell's argument order, not Scheme's
+interp = (state, instructions) -> foldl(step, state, instructions)
+
+step = (state, instruction) ->
+  if      instruction == "R" then turnR(state)
+  else if instruction == "L" then turnL(state)
+  else let x   = first(state) in
+       let y   = first(rest(state)) in
+       let dir = first(rest(rest(state))) in
+       let i   = instruction in
+         if      dir == "N" then [x,     y + i, dir]
+         else if dir == "S" then [x,     y - i, dir]
+         else if dir == "E" then [x + i, y,     dir]
+         else if dir == "W" then [x - i, y,     dir]
+         else error("bad dir")
+
+turnR = (state) ->
+  let x   = first(state) in
+  let y   = first(rest(state)) in
+  let dir = first(rest(rest(state))) in
+  if      dir == "N" then [x, y, "E"]
+  else if dir == "E" then [x, y, "S"]
+  else if dir == "S" then [x, y, "W"]
+  else if dir == "W" then [x, y, "N"]
+
+turnL = (state) ->
+  let x   = first(state) in
+  let y   = first(rest(state)) in
+  let dir = first(rest(rest(state))) in
+  if      dir == "N" then [x, y, "W"]
+  else if dir == "W" then [x, y, "S"]
+  else if dir == "S" then [x, y, "E"]
+  else if dir == "E" then [x, y, "N"]
+
+
+parse = (str) ->  # list of instructions
+  let toks = split(str, ", ") in
+  concat(map(parseTok, toks)
+
+parseTok = (tok) ->
+  [slice(tok, 0, 1), parseNumber(slice(tok, 1, length(tok)))]
+ 
+  
