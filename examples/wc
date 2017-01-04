@@ -1,0 +1,3 @@
+
+main = (input) ->
+  show(length(split(input, "\n")))
