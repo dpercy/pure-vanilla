@@ -13,6 +13,7 @@ executable pure-vanilla
   hs-source-dirs:      src
   main-is:             Main.hs
   other-modules:       Language.Vanilla.Core
+                     , Language.Vanilla.Eval
                      , Language.Vanilla.Parser
                      , Language.Vanilla.Server
                      , Language.Vanilla.Printer
@@ -36,6 +37,7 @@ test-suite test-pure-vanilla
   hs-source-dirs:      src
   main-is:             Test.hs
   other-modules:       Language.Vanilla.Core
+                     , Language.Vanilla.Eval
                      , Language.Vanilla.Parser
                      , Language.Vanilla.Server
                      , Language.Vanilla.Printer

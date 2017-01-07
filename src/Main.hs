@@ -5,7 +5,8 @@ import System.Environment
 import qualified Language.Vanilla.Server
 
 import qualified Language.Vanilla.Parser
-import Language.Vanilla.Core (Def(..), Expr(..), Atom(..), runInDefs)
+import Language.Vanilla.Core (Def(..), Expr(..), Atom(..))
+import Language.Vanilla.Eval (runInDefs)
 
 main :: IO ()
 main = do

@@ -3,6 +3,7 @@
 module Language.Vanilla.Server where
 
 import Language.Vanilla.Core
+import Language.Vanilla.Eval
 import Language.Vanilla.Parser (parseProgram, parseExpr)
 import Language.Vanilla.Printer (showExpr, showDefs)
 import Language.Vanilla.JS (trResidualProgram)
