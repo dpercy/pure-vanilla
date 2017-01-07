@@ -7,56 +7,13 @@ import qualified Data.Map as Map
 import Data.Map (Map)
 import qualified Data.Set as Set
 import Data.Set (Set)
-import GHC.Generics
 import GHC.Exts
 import Data.List (find)
 import Data.Void
-import Data.Maybe
 import Control.Monad.Writer
 
 import Language.Vanilla.Core
 
--- inscope represents a set of in-scope Vars:
--- it tracks the largest number-part of each name that is in scope.
-data InScope = InScope (Map String Integer)
-             deriving (Eq, Show, Generic)
-
--- for in infix:  Map.lookup k m `fallback` x
-fallback :: Maybe a -> a -> a
-fallback = flip fromMaybe
-
-emptyScope = InScope Map.empty
-
-addToScope :: Var -> InScope -> InScope
-addToScope (Var x i) (InScope sc) = InScope $ Map.insert x newI sc
-  where newI = max i oldI
-        oldI = Map.lookup x sc `fallback` 0
-
-instance IsList InScope where
-  type Item InScope = Var
-  fromList = foldr addToScope emptyScope
-  toList = undefined
-
-renameVar :: InScope -> Var -> Var
-renameVar (InScope sc) v@(Var x i) = case Map.lookup x sc of
-  Nothing -> if i > 0
-             then v
-                  --- HAX ALERT: ensure that the result of renameVar always
-                  -- has a positive number.
-                  -- This allows us to use (-1) as an unreadable sentinel.
-             else Var x 0
-  Just max -> if i > max
-              then v
-              else Var x (max + 1)    
-
-renameVars :: InScope -> [Var] -> (InScope, [Var])
-renameVars sc [] = (sc, [])
-renameVars sc (v:vs) =
-  let v' = renameVar sc v in
-  let sc' = addToScope v' sc in
-  let (sc'', vs') = renameVars sc' vs in
-  (sc'', v':vs')
-renameVars _ _ = error "silly GHC; this case is unreachable!"
 
 subst :: InScope -> Expr -> Map Var Expr -> Expr
 subst scope term sub =

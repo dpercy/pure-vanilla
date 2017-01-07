@@ -3,7 +3,6 @@
 module Language.Vanilla.Parser where
 
 import Language.Vanilla.Core
-import Language.Vanilla.Eval (emptyScope, InScope(..), renameVars)
 
 import Test.QuickCheck
 import Text.Parsec hiding (token, space, spaces, newline, Error)
