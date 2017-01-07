@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -W #-}
 {-# LANGUAGE TemplateHaskell, OverloadedStrings #-}
-module VanillaJS where
+module Language.Vanilla.JS where
 
 {--------------------------------------------------------------------------- }
 
@@ -21,7 +21,7 @@ Simple Approximate Core-to-JS compiler
 
 { ---------------------------------------------------------------------------}
 
-import VanillaCore
+import Language.Vanilla.Core
 import Test.QuickCheck
 import Data.List
 

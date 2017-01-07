@@ -1,11 +1,11 @@
 {-# OPTIONS_GHC -W #-}
 {-# LANGUAGE TemplateHaskell, OverloadedLists, OverloadedStrings, FlexibleContexts, NamedFieldPuns, BangPatterns #-}
-module VanillaServer where
+module Language.Vanilla.Server where
 
-import VanillaCore
-import VanillaParser (parseProgram, parseExpr)
-import VanillaPrinter (showExpr, showDefs)
-import VanillaJS (trResidualProgram)
+import Language.Vanilla.Core
+import Language.Vanilla.Parser (parseProgram, parseExpr)
+import Language.Vanilla.Printer (showExpr, showDefs)
+import Language.Vanilla.JS (trResidualProgram)
 
 import Test.QuickCheck
 import Data.IORef

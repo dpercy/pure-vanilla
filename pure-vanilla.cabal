@@ -12,11 +12,11 @@ cabal-version:       >=1.10
 executable pure-vanilla
   hs-source-dirs:      src
   main-is:             Main.hs
-  other-modules:       VanillaCore
-                     , VanillaParser
-                     , VanillaServer
-                     , VanillaPrinter
-                     , VanillaJS
+  other-modules:       Language.Vanilla.Core
+                     , Language.Vanilla.Parser
+                     , Language.Vanilla.Server
+                     , Language.Vanilla.Printer
+                     , Language.Vanilla.JS
                      , Str
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
@@ -35,11 +35,11 @@ executable pure-vanilla
 test-suite test-pure-vanilla
   hs-source-dirs:      src
   main-is:             Test.hs
-  other-modules:       VanillaCore
-                     , VanillaParser
-                     , VanillaServer
-                     , VanillaPrinter
-                     , VanillaJS
+  other-modules:       Language.Vanilla.Core
+                     , Language.Vanilla.Parser
+                     , Language.Vanilla.Server
+                     , Language.Vanilla.Printer
+                     , Language.Vanilla.JS
                      , Str
   default-language:    Haskell2010
   type:                exitcode-stdio-1.0

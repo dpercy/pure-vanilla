@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -W #-}
 {-# LANGUAGE TemplateHaskell, OverloadedLists, TypeFamilies, FlexibleContexts, EmptyCase, DeriveGeneric #-}
-module VanillaCore where
+module Language.Vanilla.Core where
 
 import Test.QuickCheck
 import qualified Data.Map as Map

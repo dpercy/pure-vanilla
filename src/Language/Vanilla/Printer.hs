@@ -1,8 +1,8 @@
 {-# OPTIONS_GHC -W #-}
 {-# LANGUAGE TemplateHaskell, OverloadedLists, OverloadedStrings #-}
-module VanillaPrinter where
+module Language.Vanilla.Printer where
 
-import VanillaCore
+import Language.Vanilla.Core
 
 import Test.QuickCheck
 import Text.PrettyPrint.Leijen

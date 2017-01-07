@@ -1,8 +1,8 @@
 {-# OPTIONS_GHC -W #-}
 {-# LANGUAGE TemplateHaskell, OverloadedLists, FlexibleContexts #-}
-module VanillaParser where
+module Language.Vanilla.Parser where
 
-import VanillaCore
+import Language.Vanilla.Core
 
 import Test.QuickCheck
 import Text.Parsec hiding (token, space, spaces, newline, Error)
