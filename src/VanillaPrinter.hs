@@ -3,8 +3,6 @@
 module VanillaPrinter where
 
 import VanillaCore
-import VanillaParser (pp)
-import ExampleWordCount
 
 import Test.QuickCheck
 import Text.PrettyPrint.Leijen
@@ -130,10 +128,6 @@ showVar :: Var -> Doc
 showVar (Var x i) = if isId x then s
                     else parens s
   where s = text (x ++ "'" ++ show i)
-
-prop_wc_reparse =
-  (pp $ show $ showDefs wc)
-  == wc
 
 -- scary quickCheck macros!
 -- see haskell docs for quickCheckAll
