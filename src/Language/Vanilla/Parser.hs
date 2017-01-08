@@ -269,13 +269,12 @@ fixExprScope scope@(InScope sc) e =
   let r = fixExprScope (InScope sc) in
    case e of
     Local (Var x (-1)) -> case Map.lookup x sc of
-      Nothing -> globalOrPrim x
+      Nothing -> Global x
       Just i -> Local (Var x i)
     Local (Var x i) -> Local (Var x i)
     Func p b -> let (scope', p') = renameVars scope p in
                  Func p' (fixExprScope scope' b)
     Global _ -> error "fixScope assumes all ids are Local"
-    Prim _ -> e
     Lit _ -> e
     Error _ -> e
     -- TODO enforce here my assumption that quoted syntax does not contain free variables.
@@ -290,11 +289,6 @@ fixExprScope scope@(InScope sc) e =
 parseProgram s = fixScope `fmap` parse program "<in>" s
 
 parseExpr s = fixExprScope emptyScope `fmap` parse expr "<in>" s
-
-globalOrPrim :: String -> Expr
-globalOrPrim name = case primByName name of
-  Nothing -> Global name
-  Just op -> Prim op
 
 
 prop_empty =
@@ -343,7 +337,7 @@ prop_call_curry =
 prop_prefix =
   pp "f = () -> (- x)"
   == [  Def "f" (Func []
-                 (App (Prim OpMinus) [Global "x"]))
+                 (App (Global "-") [Global "x"]))
      ]
 
 prop_ops =
@@ -356,7 +350,7 @@ prop_ops =
 
 prop_letin =
   pp "v = let x = 1 in (x + 2)"
-  == [ Def "v" (App (Func [Var "x" 0] (App (Prim OpPlus)
+  == [ Def "v" (App (Func [Var "x" 0] (App (Global "+")
                                        [Local (Var "x" 0), 2]))
                 [1]) ]
 
@@ -370,11 +364,11 @@ prop_conditionals =
 
 prop_prims =
   pp "v = 1 < 2"
-  == [ Def "v" (App (Prim OpLessThan) [1, 2]) ]
+  == [ Def "v" (App (Global "<") [1, 2]) ]
 
 prop_if_has_lower_precedence_than_infix =
   pp "v = if 1 then 2 else 3 + 4"
-  == [ Def "v" (If 1 2 (App (Prim OpPlus) [3, 4])) ]
+  == [ Def "v" (If 1 2 (App (Global "+") [3, 4])) ]
 
 prop_if_has_lower_precedence_than_apply =
   pp "v = if 1 then 2 else f(3)"
@@ -382,7 +376,7 @@ prop_if_has_lower_precedence_than_apply =
 
 prop_if_has_lower_precedence_than_apply_then_infix =
   pp "v = if 1 then 2 else 3(4) + 5"
-  == [ Def "v" (If 1 2 (App (Prim OpPlus) [App 3 [4], 5])) ]
+  == [ Def "v" (If 1 2 (App (Global "+") [App 3 [4], 5])) ]
 
 prop_shadow =
   pp "f = (x) -> (x) -> x"

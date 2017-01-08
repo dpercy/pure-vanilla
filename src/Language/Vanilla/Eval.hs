@@ -11,10 +11,9 @@ import GHC.Exts
 import Data.List (find)
 import Data.Void
 import Control.Monad.Writer
-import Data.List.Split (splitOn)
 
 import Language.Vanilla.Core
-import Language.Vanilla.Printer (showExpr) -- for "show" Primop
+import Language.Vanilla.Prims
 
 
 subst :: InScope -> Expr -> Map Var Expr -> Expr
@@ -23,7 +22,6 @@ subst scope term sub =
    case term of
     Local v -> Map.lookup v sub `fallback` term
     Global _ -> term
-    Prim _ -> term
     Lit _ -> term
     Perform e -> Perform (recur e)
     Cons e0 e1 -> Cons (recur e0) (recur e1)
@@ -57,7 +55,6 @@ freeVars :: Expr -> Set Var
 freeVars (Local v) = [v]
 freeVars (Func params body) = freeVars body `Set.difference` (fromList params)
 freeVars (Global _) = []
-freeVars (Prim _) = []
 freeVars (Lit _) = []
 freeVars (Error _) = []
 freeVars (Quote _) = []
@@ -67,61 +64,6 @@ freeVars (Tag  e0 e1   ) = Set.unions . map freeVars $ [e0, e1]
 freeVars (App  e0 e1   ) = Set.unions . map freeVars $ [e0, e1]
 freeVars (If   e0 e1 e2) = Set.unions . map freeVars $ [e0, e1, e2]
 
-unop :: (Expr -> Expr) -> [Expr] -> Expr
-unop f [a] = f a
-unop _ [] = Error "not enough args"
-unop _ _ = Error "too many args"
-
-binop :: (Expr -> Expr -> Expr) -> [Expr] -> Expr
-binop f [a,b] = f a b
-binop _ [] = Error "not enough args"
-binop _ [_] = Error "not enough args"
-binop _ _ = Error "too many args"
-
-applyPrim :: PrimFunc -> [Expr] -> Expr
-applyPrim OpIsEmpty  = unop $ \v -> Lit $ Bool $ case v of Lit Null -> True ; _ -> False
-applyPrim OpIsCons   = unop $ \v -> Lit $ Bool $ case v of Cons _ _ -> True ; _ -> False
-applyPrim OpFirst    = unop $ \v -> case v of Cons a _ -> a ; _ -> Error "first non-cons"
-applyPrim OpRest     = unop $ \v -> case v of Cons _ b -> b ; _ -> Error "rest non-cons"
-applyPrim OpIsTagged = binop $ \k t -> Lit $ Bool $ case t of Tag k' _ -> k == k' ; _ -> False
-applyPrim OpUntag    = binop $ \k t -> case k of
-                                        Lit (String s) ->
-                                          case t of
-                                           Tag (Lit (String s')) v ->
-                                             if s == s'
-                                             then v
-                                             else Error "untag key mismatch"
-                                           _ -> Error "untag arg must be a tagged value"
-                                        _ -> Error "untag key must be a symbol"
-
-applyPrim OpPlus = \args -> case parseNums args of
-  Nothing -> Error "plus a non-number"
-  Just ns -> Lit (Num (foldr (+) 0 ns))
-applyPrim OpMinus = \args -> case args of
-  [] -> Error "not enough args"
-  [(Lit (Num x))] -> Lit (Num (- x))
-  [(Lit (Num x)), (Lit (Num y))] -> Lit (Num (x - y))
-  [_] -> Error "minus a non-number"
-  [_, _] -> Error "minus a non-number"
-  _ -> Error "too many args"
-applyPrim OpTimes = \args -> case parseNums args of
-  Nothing -> Error "times a non-number"
-  Just ns -> Lit (Num (foldr (*) 1 ns))
-applyPrim OpLessThan = binop $ \x y -> case (x, y) of
-  ((Lit (Num x)), (Lit (Num y))) -> Lit (Bool (x < y))
-  _ -> Error "less-than a non-number"
-applyPrim OpShow     = unop $ Lit . String . show . showExpr
-applyPrim OpLength   = unop $ \v -> case parseExprList v of
-  Just lst -> Lit . Num . toRational $ length lst
-  Nothing -> Error "length non-list"
-applyPrim OpSplit    = binop $ \str delim -> case str of
-  Lit (String str) -> case delim of
-    Lit (String delim) -> fromList $ map (Lit . String) $ splitOn delim str
-    _ -> Error "split non-string"
-  _ -> Error "split non-string"
-applyPrim OpSplitLines = unop $ \v -> case v of
-  Lit (String s) -> fromList $ map (Lit . String) $ lines s
-  _ -> Error "splitlines non-string"
 
 data Context = Hole
              | Perform0 Context
@@ -149,8 +91,9 @@ data Split = Value
            deriving (Eq, Show)
 split :: Expr -> Split
 split (Local _) = error "unreachable - split doesn't reach under binders"
-split (Global x) = Split Hole (Global x)
-split (Prim _) = Value
+split (Global x) = case Map.lookup x prims of
+                    Just _ -> Value
+                    Nothing -> Split Hole (Global x)
 split (Lit _) = Value
 split (Perform eff) = case split eff of
   Value -> Split Hole (Perform eff)
@@ -235,11 +178,12 @@ step expr = case split expr of
 stepRoot :: Expr -> Expr
 stepRoot (Local _) = error "stepRoot assumes locals have already been substituted"
 stepRoot (Global x) = Error ("unbound global: " ++ x)
-stepRoot (Prim _) = error "not a redex"
 stepRoot (Perform _) = error "stepRoot can't handle Perform"
-stepRoot (App (Prim op) args) = case parseExprList args of
-                                 Nothing -> Error "args must be a list"
-                                 Just args -> applyPrim op args
+stepRoot (App (Global op) args) = case Map.lookup op prims of
+  Nothing -> error "unreachable - if app/global is a redex, global must be a value - a prim."
+  Just f -> case parseExprList args of
+             Nothing -> Error "args must be a list"
+             Just args -> f args
 stepRoot (App (Func params body) args) = case parseExprList args of
   Nothing -> Error "args must be a list"
   Just args -> if length params == length args
@@ -430,18 +374,18 @@ prop_evalShadowGlobal =
           ]
 
 prop_evalPrim =
-  stepDefs [ Def "x" (App (Prim OpPlus) [3, 4]) ]
+  stepDefs [ Def "x" (App (Global "+") [3, 4]) ]
   == Next  [ Def "x" 7 ]
 
 prop_evenOdd = lookupDef "result" (evalDefs
   [ Def "isEven" (Func [Var "n" 0]
-                  (If (App (Prim OpLessThan) [Local (Var "n" 0), 1])
+                  (If (App (Global "<") [Local (Var "n" 0), 1])
                    (Lit $ Bool True)
-                   (App (Global "isOdd") [(App (Prim OpPlus) [-1, Local (Var "n" 0)])])))
+                   (App (Global "isOdd") [(App (Global "+") [-1, Local (Var "n" 0)])])))
   , Def "isOdd" (Func [Var "n" 0]
-                 (If (App (Prim OpLessThan) [Local (Var "n" 0), 1])
+                 (If (App (Global "<") [Local (Var "n" 0), 1])
                   (Lit $ Bool False)
-                  (App (Global "isEven") [(App (Prim OpPlus) [-1, Local (Var "n" 0)])])))
+                  (App (Global "isEven") [(App (Global "+") [-1, Local (Var "n" 0)])])))
   , Def "result" (App (Global "isEven") [5])
   ])
   == Just (Lit $ Bool False)

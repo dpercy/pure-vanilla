@@ -18,13 +18,11 @@ import Data.ByteString.Lazy.Char8 (unpack)
 import Data.String (fromString)
 import System.Timeout
 
-instance Aeson.FromJSON PrimFunc
 instance Aeson.FromJSON Var
 instance Aeson.FromJSON Atom
 instance Aeson.FromJSON Expr
 instance Aeson.FromJSON Def
 
-instance Aeson.ToJSON PrimFunc
 instance Aeson.ToJSON Var
 instance Aeson.ToJSON Atom
 instance Aeson.ToJSON Expr

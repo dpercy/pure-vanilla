@@ -53,7 +53,6 @@ se expr = wrap (showExpr expr)
                 -- leaf expressions don't need parens
                 Global _ -> id
                 Local _ -> id
-                Prim _ -> id
                 Lit _ -> id
                 -- constructor and effect calls don't need parens
                 Perform _ -> id
@@ -70,7 +69,6 @@ se expr = wrap (showExpr expr)
 showExpr :: Expr -> Doc
 showExpr (Local v) = showVar v
 showExpr (Global x) = showGlobal x
-showExpr (Prim op) = showGlobal $ primName op
 showExpr (Lit Null) = "null"
 showExpr (Lit (Bool b)) = if b then "true" else "false"
 showExpr (Lit (Num n)) = case denominator n of
@@ -86,7 +84,9 @@ showExpr (App (Func [x] body) [e]) = sep [ hsep [ "let", showVar x, "=", se e, "
                                          , se body
                                          ]
 showExpr (App f a) = case f of
-  Prim op -> showInfix (primName op) a
+  -- TODO do this more generally
+  Global "+" -> showInfix "+" a
+  Global "-" -> showInfix "-" a
   _ -> se f <> showArgs a
         
 showExpr (If t c a) = sep [ "if" <+> se t

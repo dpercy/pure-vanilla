@@ -57,24 +57,23 @@ trExpr e@(App f a) = case parseExprList a of
   Nothing -> noCase e
   Just a' -> case (f, a') of
     -- any-arity operator
-    (Prim op, args) | primName op `elem` ["+", "*"] ->
+    (Global op, args) | op `elem` ["+", "*"] ->
                         let args' = map trExpr args in
-                        "(" ++ (concat $ intersperse (" " ++ primName op ++ " ") args') ++ ")"
+                        "(" ++ (concat $ intersperse (" " ++ op ++ " ") args') ++ ")"
     -- binary operators
-    (Prim op, [x, y]) | primName op `elem` ["-", "<"] ->
+    (Global op, [x, y]) | op `elem` ["-", "<"] ->
                           concat [ "("
                                  , trExpr x
                                  , " "
-                                 , primName op
+                                 , op
                                  , " "
                                  , trExpr y
                                  , ")"
                                  ]
     -- unary operators
-    (Prim OpMinus, [x]) -> "(- " ++ trExpr x ++ ")"
+    (Global "-", [x]) -> "(- " ++ trExpr x ++ ")"
     -- general case for function application
     _ -> trExpr f ++ "(" ++ commas (map trExpr a') ++ ")"
-trExpr e@(Prim _) = noCase e
 trExpr (If t c a) = concat [ "("
                            , trExpr t
                            , " ? "
@@ -104,7 +103,7 @@ trAtom (String s) = show s
 
 
 prop_example =
-  trResidualProgram [Def "f" (Func [Var "x" 0] (App (Prim OpPlus) (Cons (Local (Var "x" 0)) (Cons 3 (Lit Null)))))]
+  trResidualProgram [Def "f" (Func [Var "x" 0] (App (Global "+") (Cons (Local (Var "x" 0)) (Cons 3 (Lit Null)))))]
   == unlines [ "(function() {"
              , "var f = function(_x_0) { return (_x_0 + 3.0); };"
              , "return {"

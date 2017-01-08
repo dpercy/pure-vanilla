@@ -9,7 +9,6 @@ import GHC.Generics
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
-import Data.List
 
 data Def = Def String Expr
          deriving (Eq, Show, Generic)
@@ -36,7 +35,6 @@ instance Fractional Atom where
 
 data Expr = Local Var
           | Global String
-          | Prim PrimFunc
           | Lit Atom
           | Perform Expr -- an arbitrary value can be an effect
           | Cons Expr Expr
@@ -51,43 +49,6 @@ data Expr = Local Var
 data Var = Var String Integer
          deriving (Eq, Ord, Show, Generic)
 
-data PrimFunc = OpIsEmpty
-              | OpIsCons
-              | OpFirst
-              | OpRest
-              | OpIsTagged
-              | OpUntag
-              | OpPlus
-              | OpMinus
-              | OpTimes
-              | OpLessThan
-              | OpShow
-              | OpLength
-              | OpSplit
-              | OpSplitLines
-              deriving (Eq, Show, Generic, Enum, Bounded)
-allPrimops :: [PrimFunc]
-allPrimops = enumFrom minBound
-
-primName :: PrimFunc -> String
-primName OpIsEmpty = "isEmpty"
-primName OpIsCons = "isCons"
-primName OpFirst = "first"
-primName OpRest = "rest"
-primName OpIsTagged = "isTagged"
-primName OpUntag = "untag"
-primName OpPlus = "+"
-primName OpMinus = "-"
-primName OpTimes = "*"
-primName OpLessThan = "<"
-primName OpShow = "show"
-primName OpLength = "length"
-primName OpSplit = "split"
-primName OpSplitLines = "splitlines"
--- TODO maybe Prim should just be a (Map String ([Expr] -> Expr)) instead of a type
-
-primByName :: String -> Maybe PrimFunc
-primByName name = find ((== name) . primName) allPrimops
 
 parseNums :: [Expr] -> Maybe [Rational]
 parseNums args = case args of
