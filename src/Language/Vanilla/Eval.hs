@@ -443,3 +443,4 @@ prop_runMain_ex1 =
 return []
 test :: IO Bool
 test = $quickCheckAll
+

@@ -48,7 +48,15 @@ space :: Parser Char
 space = satisfy (\c -> isSpace c && c /= '\n')
 
 spaces :: Parser ()
-spaces = skipMany space
+spaces = skipMany (ignore space <|> ignore commentLine)
+  where ignore p = p >> return ()
+
+commentLine :: Parser String
+commentLine = "comment " & do
+  char '#'
+  s <- many (noneOf "\n")
+  char '\n'
+  return s
 
 (&) = flip (<?>)
 
@@ -256,7 +264,7 @@ app (Var "tag" (-1)) [x, y] = Tag x y
 app f a = App (Local f) (foldr Cons (Lit Null) a)
 
 pp :: String -> [Def]
-pp s = case parse program "<in>" s of
+pp s = case parse (spaces >> program) "<in>" s of
   Left err -> error $ show err
   Right v -> fixScope v
 
@@ -285,9 +293,9 @@ fixExprScope scope@(InScope sc) e =
     App e0 e1 -> App (r e0) (r e1)
     If e0 e1 e2 -> If (r e0) (r e1) (r e2)
 
-parseProgram s = fixScope `fmap` parse program "<in>" s
+parseProgram s = fixScope `fmap` parse (spaces >> program) "<in>" s
 
-parseExpr s = fixExprScope emptyScope `fmap` parse expr "<in>" s
+parseExpr s = fixExprScope emptyScope `fmap` parse (spaces >> expr) "<in>" s
 
 
 prop_empty =
