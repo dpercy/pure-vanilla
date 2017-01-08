@@ -37,6 +37,7 @@ turnR = (state) ->
   else if dir == "E" then [x, y, "S"]
   else if dir == "S" then [x, y, "W"]
   else if dir == "W" then [x, y, "N"]
+  else error("bad dir")
 
 turnL = (state) ->
   let x   = first(state) in
@@ -46,13 +47,18 @@ turnL = (state) ->
   else if dir == "W" then [x, y, "S"]
   else if dir == "S" then [x, y, "E"]
   else if dir == "E" then [x, y, "N"]
+  else error("bad dir")
 
 
 parse = (str) ->  # list of instructions
   let toks = split(str, ", ") in
-  concat(map(parseTok, toks)
+  concat(map(parseTok, toks))
 
 parseTok = (tok) ->
   [slice(tok, 0, 1), parseNumber(slice(tok, 1, length(tok)))]
- 
-  
+
+
+# TODO this really belongs in the stdlib
+map = (f, lst) ->
+  if isEmpty(lst) then []
+  else [ f(first(lst)), ...map(f, rest(lst)) ]

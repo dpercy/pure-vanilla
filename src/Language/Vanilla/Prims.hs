@@ -52,7 +52,13 @@ prims = Map.fromList [
     _ -> Error "split non-string"),
   ("splitlines", unop $ \v -> case v of
                                Lit (String s) -> fromList $ map (Lit . String) $ lines s
-                               _ -> Error "splitlines non-string")
+                               _ -> Error "splitlines non-string"),
+  -- TODO can I use a type class to eliminate these tedious conversions?
+  ("concat", unop $ \v -> case parseExprList v of
+                           Nothing -> Error "concat non-list"
+                           Just vs -> case sequence (map parseExprList vs) of
+                             Nothing -> Error "concat list contained non-list"
+                             Just vs -> fromList (concat vs))
   ]
   where unop :: (Expr -> Expr) -> [Expr] -> Expr
         unop f [a] = f a

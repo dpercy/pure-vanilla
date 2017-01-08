@@ -89,7 +89,7 @@ tok_op = token $ do
   i <- maybeNumSuffix
   return $ Var cs (fromMaybe (-1) i)
 tok_str = token $ do char '"'
-                     s <- many (digit <|> letter <|> escapes <|> oneOf " ") -- TODO actual strings
+                     s <- many (noneOf ['\\', '"', '\n'] <|> escapes)
                      char '"'
                      return s
   where escapes :: Parser Char
@@ -120,6 +120,7 @@ tok_decimal = token $ do realPart <- many1 digit
                          fracPart <- many1 digit
                          return $ (fromInteger $ read realPart) + (read fracPart % 10 ^ length fracPart)
 tok_colon = token $ char ':'
+tok_ellipsis = token $ string "..."
 
 parens = between tok_openParen tok_closeParen
 
@@ -183,13 +184,29 @@ leaf = literal
               return $ Local op
        <|> parens (between (optional tok_newline) (optional tok_newline) expr)
        <|> do tok_openBracket
-              tok_closeBracket
-              -- TODO a more-general list notation here
-              return (Lit Null)
+              parseList
+
+parseList :: Parser Expr
+parseList = emptyCase <|> splatCase <|> itemCase
+  where emptyCase = do tok_closeBracket
+                       return (Lit Null)
+        splatCase = do tok_ellipsis
+                       e <- expr
+                       tok_closeBracket
+                       optional tok_comma
+                       return e
+        itemCase = do e <- expr
+                      endNoComma e <|> commaAndContinue e
+        endNoComma e = do tok_closeBracket
+                          return (Cons e (Lit Null))
+        commaAndContinue e = do tok_comma
+                                rest <- parseList
+                                return (Cons e rest)
 factor = do head <- leaf
             -- TODO test curried calls like f(1)(2)
             calls head
               where calls head = (call head >>= calls) <|> return head
+arith :: Parser Expr
 arith = prefixOp <|> infixes
  where prefixOp = do op <- try tok_op
                      arg <- factor
