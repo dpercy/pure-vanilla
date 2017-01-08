@@ -1,7 +1,7 @@
 # http://adventofcode.com/2016/day/1
 
 main = (input) ->
-  measure(interp(initialState, parse(input)))
+  show(measure(interp(initialState, parse(input))))
 
 measure = (state) ->
   abs(first(state)) + abs(first(rest(state)))
@@ -62,3 +62,6 @@ parseTok = (tok) ->
 map = (f, lst) ->
   if isEmpty(lst) then []
   else [ f(first(lst)), ...map(f, rest(lst)) ]
+foldl = (f, init, lst) ->
+  if isEmpty(lst) then init
+  else foldl(f, f(init, first(lst)), rest(lst))

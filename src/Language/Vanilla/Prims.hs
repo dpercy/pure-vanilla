@@ -10,10 +10,10 @@ import Language.Vanilla.Printer (showExpr) -- for "show" Primop
 
 prims :: Map String ([Expr] -> Expr)
 prims = Map.fromList [
-  ("isEmpty", unop $ \v -> Lit $ Bool $ case v of Lit Null -> True ; _ -> False),
-  ("isCons", unop $ \v -> Lit $ Bool $ case v of Cons _ _ -> True ; _ -> False),
-  ("first", unop $ \v -> case v of Cons a _ -> a ; _ -> Error "first non-cons"),
-  ("rest", unop $ \v -> case v of Cons _ b -> b ; _ -> Error "rest non-cons"),
+  unop "isEmpty" $ \v -> Lit $ Bool $ case v of Lit Null -> True ; _ -> False,
+  unop "isCons" $ \v -> Lit $ Bool $ case v of Cons _ _ -> True ; _ -> False,
+  unop "first" $ \v -> case v of Cons a _ -> a ; _ -> Error "first non-cons",
+  unop "rest" $ \v -> case v of Cons _ b -> b ; _ -> Error "rest non-cons",
   ("isTagged", binop $ \k t -> Lit $ Bool $ case t of Tag k' _ -> k == k' ; _ -> False),
   ("untag", binop $ \k t -> case k of
                              Lit (String s) ->
@@ -34,20 +34,28 @@ prims = Map.fromList [
                   _ -> Error "too many args"),
   ("*", varop $ \nums -> foldr (*) 1 nums :: Rational),
   ("<", binop $ \a b -> a < (b :: Rational)),
-  ("show", unop $ Lit . String . show . showExpr),
-  ("length", unop $ \v -> length (v :: [Expr])),
+  unop "show" (Lit . String . show . showExpr),
+  unop "length" (\v -> case v of
+                  Lit (String s) -> toExpr (length s)
+                  v -> case parseExprList v of
+                    Just v -> toExpr (length v)
+                    Nothing -> Error "length: non-list, non-string"),
   ("split", binop $ \str delim -> splitOn delim str :: [String]),
-  ("splitlines", unop lines),
-  ("concat", unop $ \v -> concat (v :: [[Expr]])),
+  unop "splitlines" lines,
+  unop "concat" (\v -> concat (v :: [[Expr]])),
   ("slice", ternop $ \str lo hi -> drop lo (take hi str) :: String),
-  ("parseInt", unop $ \v -> read v :: Integer)
+  unop "parseInt" (\v -> read v :: Integer),
+  ("==", binop $ \a b -> (a :: Expr) == (b :: Expr))
   ]
-  where unop :: Repr a => Repr b => (a -> b) -> [Expr] -> Expr
-        unop f [a] = case fromExpr a of
-                      Left err -> Error err -- TODO add name of prim here?
+  where die name err = Error (name ++ ": " ++ err)
+        unop :: Repr a => Repr b => String -> (a -> b) -> (String, [Expr] -> Expr)
+        unop name f = (name, f')
+          where f' [a] = case fromExpr a of
+                      Left err -> die name err
                       Right a -> toExpr (f a)
-        unop _ [] = Error "not enough args"
-        unop _ _ = Error "too many args"
+                f' [] = die name "not enough args"
+                f' _ = die name "too many args"
+        -- TODO do the same error-reporting thing for other helpers here
         binop :: Repr a => Repr b => Repr c => (a -> b -> c) -> [Expr] -> Expr
         binop f [a,b] = case fromExpr a of
                          Left err -> Error err
