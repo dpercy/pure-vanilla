@@ -9,6 +9,7 @@ import GHC.Generics
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
+import Data.List
 
 data Def = Def String Expr
          deriving (Eq, Show, Generic)
@@ -76,6 +77,8 @@ primName OpMinus = "-"
 primName OpTimes = "*"
 primName OpLessThan = "<"
 
+primByName :: String -> Maybe PrimFunc
+primByName name = find ((== name) . primName) allPrimops
 
 parseNums :: [Expr] -> Maybe [Rational]
 parseNums args = case args of

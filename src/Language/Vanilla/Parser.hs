@@ -60,6 +60,9 @@ token p = do
   spaces
   return v
 
+-- parses either a quote-number suffix, like '0 or '123,
+-- or nothing.
+-- This is used in identifiers, which have an optional suffix.
 maybeNumSuffix :: Parser (Maybe Integer)
 maybeNumSuffix = optionMaybe $ try $ do char '\''
                                         ds <- many1 digit
@@ -245,12 +248,6 @@ app :: Var -> [Expr] -> Expr
 app (Var "perform" (-1)) [e] = Perform e
 app (Var "cons" (-1)) [x, y] = Cons x y
 app (Var "tag" (-1)) [x, y] = Tag x y
-
-app (Var "+" (-1)) args = App (Prim OpPlus) (fromList args)
-app (Var "-" (-1)) args = App (Prim OpMinus) (fromList args)
-app (Var "*" (-1)) args = App (Prim OpTimes) (fromList args)
-app (Var "<" (-1)) args = App (Prim OpLessThan) (fromList args)
--- TODO more cases for more ops
 app f a = App (Local f) (foldr Cons (Lit Null) a)
 
 pp :: String -> [Def]
@@ -266,7 +263,7 @@ fixExprScope scope@(InScope sc) e =
   let r = fixExprScope (InScope sc) in
    case e of
     Local (Var x (-1)) -> case Map.lookup x sc of
-      Nothing -> Global x
+      Nothing -> globalOrPrim x
       Just i -> Local (Var x i)
     Local (Var x i) -> Local (Var x i)
     Func p b -> let (scope', p') = renameVars scope p in
@@ -287,6 +284,11 @@ fixExprScope scope@(InScope sc) e =
 parseProgram s = fixScope `fmap` parse program "<in>" s
 
 parseExpr s = fixExprScope emptyScope `fmap` parse expr "<in>" s
+
+globalOrPrim :: String -> Expr
+globalOrPrim name = case primByName name of
+  Nothing -> Global name
+  Just op -> Prim op
 
 
 prop_empty =
