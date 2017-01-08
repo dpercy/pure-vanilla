@@ -61,6 +61,10 @@ data PrimFunc = OpIsEmpty
               | OpMinus
               | OpTimes
               | OpLessThan
+              | OpShow
+              | OpLength
+              | OpSplit
+              | OpSplitLines
               deriving (Eq, Show, Generic, Enum, Bounded)
 allPrimops :: [PrimFunc]
 allPrimops = enumFrom minBound
@@ -76,6 +80,11 @@ primName OpPlus = "+"
 primName OpMinus = "-"
 primName OpTimes = "*"
 primName OpLessThan = "<"
+primName OpShow = "show"
+primName OpLength = "length"
+primName OpSplit = "split"
+primName OpSplitLines = "splitlines"
+-- TODO maybe Prim should just be a (Map String ([Expr] -> Expr)) instead of a type
 
 primByName :: String -> Maybe PrimFunc
 primByName name = find ((== name) . primName) allPrimops

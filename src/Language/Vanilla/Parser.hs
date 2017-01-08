@@ -12,7 +12,6 @@ import Data.Char
 import Data.Ratio
 import Data.Maybe
 import qualified Data.Map as Map
-import GHC.Exts (fromList)
 
 {-
 
@@ -83,9 +82,16 @@ tok_op = token $ do
   i <- maybeNumSuffix
   return $ Var cs (fromMaybe (-1) i)
 tok_str = token $ do char '"'
-                     s <- many (digit <|> letter) -- TODO actual strings
+                     s <- many (digit <|> letter <|> escapes <|> oneOf " ") -- TODO actual strings
                      char '"'
                      return s
+  where escapes :: Parser Char
+        escapes = try $ do char '\\'
+                           c <- anyChar
+                           case c of
+                            't' -> return '\t'
+                            'n' -> return '\n'
+                            _ -> fail ("bad escape character: " ++ show c)
 tok_semicolon = token $ char ';'
 tok_newline = (many1 $ token $ char '\n') >> return '\n'
 tok_openParen = token $ char '('

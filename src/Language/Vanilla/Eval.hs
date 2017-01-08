@@ -11,8 +11,10 @@ import GHC.Exts
 import Data.List (find)
 import Data.Void
 import Control.Monad.Writer
+import Data.List.Split (splitOn)
 
 import Language.Vanilla.Core
+import Language.Vanilla.Printer (showExpr) -- for "show" Primop
 
 
 subst :: InScope -> Expr -> Map Var Expr -> Expr
@@ -108,6 +110,18 @@ applyPrim OpTimes = \args -> case parseNums args of
 applyPrim OpLessThan = binop $ \x y -> case (x, y) of
   ((Lit (Num x)), (Lit (Num y))) -> Lit (Bool (x < y))
   _ -> Error "less-than a non-number"
+applyPrim OpShow     = unop $ Lit . String . show . showExpr
+applyPrim OpLength   = unop $ \v -> case parseExprList v of
+  Just lst -> Lit . Num . toRational $ length lst
+  Nothing -> Error "length non-list"
+applyPrim OpSplit    = binop $ \str delim -> case str of
+  Lit (String str) -> case delim of
+    Lit (String delim) -> fromList $ map (Lit . String) $ splitOn delim str
+    _ -> Error "split non-string"
+  _ -> Error "split non-string"
+applyPrim OpSplitLines = unop $ \v -> case v of
+  Lit (String s) -> fromList $ map (Lit . String) $ lines s
+  _ -> Error "splitlines non-string"
 
 data Context = Hole
              | Perform0 Context

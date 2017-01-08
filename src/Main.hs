@@ -23,7 +23,7 @@ interactMain file = do
   contents <- readFile file
   interact $ \input -> do
     let prog = Language.Vanilla.Parser.pp contents :: [Def]
-    let expr = App (Global "main") (Cons (Lit $ String contents) (Lit Null))
+    let expr = App (Global "main") (Cons (Lit $ String input) (Lit Null))
     let handler = (const $ return $ Error "unhandled effect")
     result <- runInDefs prog expr handler
     case result of
