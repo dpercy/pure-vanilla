@@ -28,4 +28,5 @@ interactMain file = do
     result <- runInDefs prog expr handler
     case result of
      Lit (String s) -> s
+     Error err -> error err
      v -> error ("main returned a non-string: " ++ show v)

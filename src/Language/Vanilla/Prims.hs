@@ -38,7 +38,9 @@ prims = Map.fromList [
   ("length", unop $ \v -> length (v :: [Expr])),
   ("split", binop $ \str delim -> splitOn delim str :: [String]),
   ("splitlines", unop lines),
-  ("concat", unop $ \v -> concat (v :: [[Expr]]))
+  ("concat", unop $ \v -> concat (v :: [[Expr]])),
+  ("slice", ternop $ \str lo hi -> drop lo (take hi str) :: String),
+  ("parseInt", unop $ \v -> read v :: Integer)
   ]
   where unop :: Repr a => Repr b => (a -> b) -> [Expr] -> Expr
         unop f [a] = case fromExpr a of
@@ -56,6 +58,16 @@ prims = Map.fromList [
         binop _ [] = Error "not enough args"
         binop _ [_] = Error "not enough args"
         binop _ _ = Error "too many args"
+        ternop :: Repr a => Repr b => Repr c => Repr d => (a -> b -> c -> d) -> [Expr] -> Expr
+        ternop f [a, b, c] = case args of
+                              Right (a, b, c) -> toExpr (f a b c)
+                              Left err -> Error err
+          where args = do a <- fromExpr a
+                          b <- fromExpr b
+                          c <- fromExpr c
+                          return (a, b, c)
+        ternop _ (_:_:_:_) = Error "too many args"
+        ternop _ _ = Error "not enough args"
         varop :: Repr a => Repr b => ([a] -> b) -> [Expr] -> Expr
         varop f a = case mapM fromExpr a of
           Left err -> Error err

@@ -55,7 +55,7 @@ parse = (str) ->  # list of instructions
   concat(map(parseTok, toks))
 
 parseTok = (tok) ->
-  [slice(tok, 0, 1), parseNumber(slice(tok, 1, length(tok)))]
+  [slice(tok, 0, 1), parseInt(slice(tok, 1, length(tok)))]
 
 
 # TODO this really belongs in the stdlib
