@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, OverloadedLists, TypeFamilies, FlexibleContexts, EmptyCase, DeriveGeneric #-}
+{-# LANGUAGE TemplateHaskell, OverloadedLists, TypeFamilies, FlexibleContexts, EmptyCase, DeriveGeneric, FlexibleInstances #-}
 module Language.Vanilla.Core where
 
 
@@ -8,6 +8,7 @@ import GHC.Generics
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
+import Data.Ratio
 
 data Def = Def String Expr
          deriving (Eq, Show, Generic)
@@ -47,15 +48,6 @@ data Expr = Local Var
 
 data Var = Var String Integer
          deriving (Eq, Ord, Show, Generic)
-
-
-parseNums :: [Expr] -> Maybe [Rational]
-parseNums args = case args of
-  [] -> Just []
-  ((Lit (Num x)):rest) -> do rest' <- parseNums rest
-                             Just (x:rest')
-  _ -> Nothing
-
 
 
 instance IsList Expr where
@@ -126,3 +118,52 @@ renameVars sc (v:vs) =
   let (sc'', vs') = renameVars sc' vs in
   (sc'', v':vs')
 renameVars _ _ = error "silly GHC; this case is unreachable!"
+
+
+class Repr t where
+  -- toExpr always succeeds.
+  -- For example, a Haskell String can always become a Lit String.
+  toExpr :: t -> Expr
+  -- fromExpr can fail.
+  -- For example, when trying to extract a Haskell String, you might encounter some other Expr.
+  fromExpr :: Expr -> Either String t
+
+instance Repr (Ratio Integer) where
+  toExpr = Lit . Num
+  fromExpr (Lit (Num i)) = return i
+  fromExpr _ = Left "non-number"
+
+instance Repr Integer where
+  toExpr = Lit . Num . toRational
+  fromExpr e = do e <- fromExpr e
+                  case denominator e of
+                   1 -> return $ numerator e
+                   _ -> Left "non-integer"
+
+instance Repr Int where
+  toExpr = Lit . Num . toRational
+  fromExpr e = do e <- fromExpr e
+                  case denominator e of
+                   1 -> return $ fromInteger $ numerator e
+                   _ -> Left "non-integer"
+
+instance Repr Bool where
+  toExpr = Lit . Bool
+  fromExpr (Lit (Bool b)) = return b
+  fromExpr _ = Left "non-boolean"
+
+instance {-# OVERLAPPING #-} Repr [Char] where
+  toExpr = Lit . String
+  fromExpr (Lit (String s)) = return s
+  fromExpr _ = Left "non-string"
+
+instance {-# OVERLAPPABLE #-} Repr a => Repr [a] where
+  toExpr xs = fromList (map toExpr xs)
+  fromExpr e = case parseExprList e of
+    Nothing -> Left "non-list"
+    Just es -> mapM fromExpr es
+
+instance Repr Expr where
+  toExpr = id
+  fromExpr = return
+    
