@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -W #-}
 {-# LANGUAGE TemplateHaskell, OverloadedLists, TypeFamilies, FlexibleContexts, EmptyCase, DeriveGeneric #-}
 module Language.Vanilla.Core where
 

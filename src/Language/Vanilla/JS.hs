@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -W #-}
 {-# LANGUAGE TemplateHaskell, OverloadedStrings #-}
 module Language.Vanilla.JS where
 

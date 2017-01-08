@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -W #-}
 {-# LANGUAGE TemplateHaskell, OverloadedLists, OverloadedStrings #-}
 module Language.Vanilla.Printer where
 

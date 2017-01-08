@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -W #-}
 {-# LANGUAGE TemplateHaskell, OverloadedLists, FlexibleContexts #-}
 module Language.Vanilla.Parser where
 

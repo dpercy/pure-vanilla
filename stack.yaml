@@ -16,6 +16,9 @@ flags: {}
 # Control whether we use the GHC we find on the path
 # system-ghc: true
 
+ghc-options:
+    "*": -O0 -W
+
 # Require a specific version of stack, using version ranges
 # require-stack-version: -any # Default
 # require-stack-version: >= 0.1.4.0

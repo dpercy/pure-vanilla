@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -W #-}
 {-# LANGUAGE TemplateHaskell, OverloadedLists, OverloadedStrings, FlexibleContexts, NamedFieldPuns, BangPatterns #-}
 module Language.Vanilla.Server where
 
