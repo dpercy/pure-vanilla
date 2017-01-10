@@ -1,6 +1,8 @@
 {-# LANGUAGE TemplateHaskell, OverloadedLists, OverloadedStrings #-}
 module Language.Vanilla.Printer where
 
+import Prelude hiding (showList)
+
 import Language.Vanilla.Core
 
 import Test.QuickCheck
@@ -68,14 +70,14 @@ se expr = wrap (showExpr expr)
 showExpr :: Expr -> Doc
 showExpr (Local v) = showVar v
 showExpr (Global x) = showGlobal x
-showExpr (Lit Null) = "null"
+showExpr e@(Lit Null) = showList e
+showExpr e@(Cons _ _) = showList e
 showExpr (Lit (Bool b)) = if b then "true" else "false"
 showExpr (Lit (Num n)) = case denominator n of
   1 -> text $ (show $ numerator n)
   d -> text $ (show $ numerator n) ++ "/" ++ (show d)
 showExpr (Lit (String s)) = text (show s)
 showExpr (Perform eff) = "perform(" <> se eff <> ")"
-showExpr (Cons hd tl) = "cons(" <> se hd <> ", " <> se tl <> ")"
 showExpr (Tag k v) = "tag(" <> se k <> ", " <> se v <> ")"
 showExpr (Func params body) = hang 2 $ sep [ paramsDoc <+> "->", se body ]
   where paramsDoc = parens $ sep $ punctuate "," $ map showVar params
@@ -94,6 +96,13 @@ showExpr (If t c a) = sep [ "if" <+> se t
                           ]
 showExpr (Error msg) = "error(" <> text (show msg) <> ")"
 showExpr (Quote stx) = ":(" <> showExpr stx <> ")"
+
+showList :: Expr -> Doc
+showList e = brackets $ align $ sep $ punctuate "," $ docs e
+  where docs (Lit Null) = []
+        docs (Cons hd tl) = (se hd):(docs tl)
+        docs rest = ["..." <> se rest]
+
 
 showInfix :: String -> Expr -> Doc
 showInfix op a = case parseExprList a of
