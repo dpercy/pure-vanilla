@@ -187,7 +187,7 @@ stepRoot (App (Func params body) args) = case parseExprList args of
   Nothing -> Error "args must be a list"
   Just args -> if length params == length args
                then substTop body (Map.fromList $ zip params args)
-               else Error "arity"
+               else Error ("arity: " ++ show params ++ " vs " ++ show (length args))
 stepRoot (App _ _) = Error "callee must be a function"
 stepRoot (If (Lit (Bool True)) c _) = c
 stepRoot (If (Lit (Bool False)) _ a) = a

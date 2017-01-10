@@ -184,6 +184,7 @@ leaf = literal
               return $ Local op
        <|> parens (between (optional tok_newline) (optional tok_newline) expr)
        <|> do tok_openBracket
+              optional tok_newline
               parseList
 
 parseList :: Parser Expr
@@ -192,14 +193,17 @@ parseList = emptyCase <|> splatCase <|> itemCase
                        return (Lit Null)
         splatCase = do tok_ellipsis
                        e <- expr
+                       optional tok_newline
                        tok_closeBracket
                        optional tok_comma
                        return e
         itemCase = do e <- expr
                       endNoComma e <|> commaAndContinue e
-        endNoComma e = do tok_closeBracket
+        endNoComma e = do optional tok_newline
+                          tok_closeBracket
                           return (Cons e (Lit Null))
         commaAndContinue e = do tok_comma
+                                optional tok_newline
                                 rest <- parseList
                                 return (Cons e rest)
 factor = do head <- leaf

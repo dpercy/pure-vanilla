@@ -1,7 +1,12 @@
 # http://adventofcode.com/2016/day/1
 
 main = (input) ->
-  show(measure(interp(initialState, parse(input))))
+  let inp = parse(input) in
+  show([
+    measure(interp(initialState, inp)),
+    measure(findFirstDup(uniqAdjacent(map(stateLoc, trace(initialState, inp))))),
+  ])
+
 
 measure = (state) ->
   abs(first(state)) + abs(first(rest(state)))
@@ -13,8 +18,14 @@ abs = (n) ->
 
 initialState = [0, 0, "N"]
 
+stateLoc = (s) -> [first(s), first(rest(s))]
+
 # note foldl uses Haskell's argument order, not Scheme's
 interp = (state, instructions) -> foldl(step, state, instructions)
+trace = (state, instructions) ->
+  if isEmpty(instructions) then [state]
+  else let newState = step(state, first(instructions)) in
+         cons(state, trace(newState, rest(instructions)))
 
 step = (state, instruction) ->
   if      instruction == "R" then turnR(state)
@@ -55,13 +66,41 @@ parse = (str) ->  # list of instructions
   concat(map(parseTok, toks))
 
 parseTok = (tok) ->
-  [slice(tok, 0, 1), parseInt(slice(tok, 1, length(tok)))]
+  # Instead of parsing R3 as ["R", 3], parse it as ["R", 1, 1, 1].
+  # It's important to consider every 1-unit step separately,
+  # because the set of "seen" locations has to count every point we pass through.
+  [slice(tok, 0, 1), ...replicate(parseInt(slice(tok, 1, length(tok))), 1)]
 
+findFirstDup = (lst) -> dupLoop([], lst)
+dupLoop = (seen, lst) ->
+  if isEmpty(lst) then error("no duplicate found")
+  else if elem(first(lst), seen) then first(lst)
+  else dupLoop(cons(first(lst), seen), rest(lst))
+
+uniqAdjacent = (lst) ->
+  if isEmpty(lst) then lst
+  else if isEmpty(rest(lst)) then lst
+  else if first(lst) == first(rest(lst)) then uniqAdjacent(cons(first(lst), rest(rest(lst))))
+  else cons(first(lst), uniqAdjacent(rest(lst)))
 
 # TODO this really belongs in the stdlib
+  # hack around lack of boolean literals...
+true = 1 == 1
+false = 1 == 0
 map = (f, lst) ->
   if isEmpty(lst) then []
   else [ f(first(lst)), ...map(f, rest(lst)) ]
 foldl = (f, init, lst) ->
   if isEmpty(lst) then init
   else foldl(f, f(init, first(lst)), rest(lst))
+elem = (x, lst) ->
+  if isEmpty(lst) then false
+  else if x == first(lst) then true
+  else elem(x, rest(lst))
+cons = (hd, tl) -> [hd, ...tl]
+append = (a, b) ->
+  if isEmpty(a) then b
+  else cons(first(a), append(rest(a), b))
+replicate = (n, x) ->
+  if 0 < n then cons(x, replicate(n - 1, x))
+  else []
