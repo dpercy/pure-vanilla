@@ -1,0 +1,54 @@
+
+main = (input) -> pretty(eval(initialState, parse(input)))
+
+parse = (input) -> map(parseLine, splitlines(input))
+parseLine = (line) -> filter(nonempty, split(line, ""))
+nonempty = (s) -> 0 < length(s)
+
+initialState = [1, 1] # x across, y down
+
+step = (state, letter) ->
+  let x = first(state) in
+  let y = first(rest(state)) in
+  if      letter == "U" then [x, dec(y)]
+  else if letter == "D" then [x, inc(y)]
+  else if letter == "L" then [dec(x), y]
+  else if letter == "R" then [inc(x), y]
+  else error("bad letter")
+inc = (n) ->
+  let nn = n + 1 in
+  if 2 < nn then 2
+  else nn
+dec = (n) ->
+  let nn = n - 1 in
+  if nn < 0 then 0
+  else nn
+
+eval = (state, lines) ->
+  if isEmpty(lines) then []
+  else let newState = evalLine(state, first(lines)) in
+         cons(newState, eval(newState, rest(lines)))
+
+evalLine = (state, line) -> foldl(step, state, line)
+
+pretty = (states) -> foldl((a, b) -> strcat(a, b), "", map(prettyState, states))
+prettyState = (state) ->
+  let x = first(state) in
+  let y = first(rest(state)) in
+  show((y * 3) + x + 1)
+
+
+# TODO stdlib
+map = (f, lst) ->
+  if isEmpty(lst) then lst
+  else cons(f(first(lst)), map(f, rest(lst)))
+filter = (f, lst) ->
+  if isEmpty(lst) then lst
+  else if f(first(lst)) then cons(first(lst), filter(f, rest(lst)))
+  else filter(f, rest(lst))
+
+foldl = (f, init, lst) ->
+  if isEmpty(lst) then init
+  else foldl(f, f(init, first(lst)), rest(lst))
+
+cons = (head, tail) -> [head, ...tail]
