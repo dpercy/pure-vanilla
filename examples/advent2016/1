@@ -4,6 +4,10 @@ main = (input) ->
   let inp = parse(input) in
   show([
     measure(interp(initialState, inp)),
+    # trace returns the list of each state we were at after each instruction.
+    # map stateLoc extracts just the position information.
+    # uniqAdjacent removes duplicates that result from "L" and "R" instructions.
+    # findFirstDup finds the first position we visited twice.
     measure(findFirstDup(uniqAdjacent(map(stateLoc, trace(initialState, inp))))),
   ])
 
