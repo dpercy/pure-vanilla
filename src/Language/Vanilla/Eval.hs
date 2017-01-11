@@ -79,6 +79,23 @@ data Context = Hole
              deriving (Eq, Show)
 
 
+stripAnn :: Expr -> Expr
+-- interesting cases
+stripAnn (Ann _ e)   = stripAnn e -- drop the ann
+stripAnn (Quote stx) = (Quote stx) -- don't recur into quote
+-- easy cases
+stripAnn (Local x) = (Local x)
+stripAnn (Global x) = (Global x)
+stripAnn (Lit v) = (Lit v)
+stripAnn (Error msg) = (Error msg)
+stripAnn (Perform e) = Perform (stripAnn e)
+stripAnn (Func params body) = (Func params (stripAnn body))
+stripAnn (Cons e0 e1   ) = (Cons (stripAnn e0) (stripAnn e1))
+stripAnn (Tag  e0 e1   ) = (Tag  (stripAnn e0) (stripAnn e1))
+stripAnn (App  e0 e1   ) = (App  (stripAnn e0) (stripAnn e1))
+stripAnn (If   e0 e1 e2) = (If   (stripAnn e0) (stripAnn e1) (stripAnn e2))
+
+
 
 {-
 split takes an expression and searches for the active expression.
@@ -414,7 +431,7 @@ stepGlobal _ _ = error "stepGlobal can only handle Global exprs"
 stepInDefs :: [Def] -> Expr -> Step Context Expr
 stepInDefs defs expr =
   case split expr of
-     Split c (Global g) -> Next $ plug c $ stepGlobal defs (Global g)
+     Split c (Global g) -> Next $ plug c $ Ann RedexAfter $ stepGlobal defs (Global g)
      _ -> step expr
 
 
@@ -446,11 +463,17 @@ traceInDefs defs expr handler = loop expr
           Done -> return [expr]
           Next e -> do
             rest <- loop e
-            return (expr:rest)
+            return (decorateRedex expr:rest)
           Yield c e -> do
             e' <- handler e
             rest <- loop (plug c e')
-            return (expr:rest)
+            return (decorateRedex expr:rest)
+
+decorateRedex :: Expr -> Expr
+decorateRedex e = case split e of
+  Value -> e
+  Crash _ -> e
+  Split ctx v -> plug ctx (Ann RedexBefore v)
 
 testHandler :: Expr -> Writer String Expr
 testHandler (Perform (Lit (String s))) = do

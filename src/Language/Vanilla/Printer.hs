@@ -66,7 +66,7 @@ se expr = wrap (showExpr expr)
                 Ann _ _ -> id
 
 showExpr :: Expr -> Doc
-showExpr (Ann RedexBefore e) = underline $ showExpr e
+showExpr (Ann RedexBefore e) = underline $ green $ showExpr e
 showExpr (Ann RedexAfter e)  = bold $ showExpr e
 showExpr (Local v) = showVar v
 showExpr (Global x) = showGlobal x
