@@ -44,6 +44,12 @@ data Expr = Local Var
           | If Expr Expr Expr
           | Error String
           | Quote Expr
+          | Ann Ann Expr
+          deriving (Eq, Show, Generic)
+
+-- type of annotations that can appear on an Expr
+data Ann = RedexBefore
+         | RedexAfter
           deriving (Eq, Show, Generic)
 
 data Var = Var String Integer

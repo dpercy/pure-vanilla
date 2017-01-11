@@ -6,14 +6,10 @@ import Prelude hiding (showList)
 import Language.Vanilla.Core
 
 import Test.QuickCheck
-import Text.PrettyPrint.Leijen
+import Text.PrettyPrint.ANSI.Leijen
 import Data.Char
-import Data.String
 import Data.List
 import Data.Ratio
-
-instance IsString Doc where
-  fromString = text
 
 
 incName :: String -> String
@@ -66,8 +62,12 @@ se expr = wrap (showExpr expr)
                 If _ _ _ -> parens . align
                 -- function calls need parens in case they are an infix op
                 App _ _ -> parens . align
+                -- annotations don't actually print, so they don't need parens
+                Ann _ _ -> id
 
 showExpr :: Expr -> Doc
+showExpr (Ann RedexBefore e) = underline $ showExpr e
+showExpr (Ann RedexAfter e)  = bold $ showExpr e
 showExpr (Local v) = showVar v
 showExpr (Global x) = showGlobal x
 showExpr e@(Lit Null) = showList e

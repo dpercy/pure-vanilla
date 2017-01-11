@@ -19,11 +19,13 @@ import System.Timeout
 
 instance Aeson.FromJSON Var
 instance Aeson.FromJSON Atom
+instance Aeson.FromJSON Ann
 instance Aeson.FromJSON Expr
 instance Aeson.FromJSON Def
 
 instance Aeson.ToJSON Var
 instance Aeson.ToJSON Atom
+instance Aeson.ToJSON Ann
 instance Aeson.ToJSON Expr
 instance Aeson.ToJSON Def
 

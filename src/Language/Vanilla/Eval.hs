@@ -34,6 +34,7 @@ subst scope term sub =
        Func params' (subst scope' body sub')
     App e0 e1 -> App (recur e0) (recur e1)
     If e0 e1 e2 -> If (recur e0) (recur e1) (recur e2)
+    Ann a e -> Ann a (recur e)
     Error _ -> term
     -- TODO what should happen when a quoted term refers to a parameter?
     --  - prevent that situation in the first place?
@@ -58,6 +59,7 @@ freeVars (Lit _) = []
 freeVars (Error _) = []
 freeVars (Quote _) = []
 freeVars (Perform e) = freeVars e
+freeVars (Ann _ e)   = freeVars e
 freeVars (Cons e0 e1   ) = Set.unions . map freeVars $ [e0, e1]
 freeVars (Tag  e0 e1   ) = Set.unions . map freeVars $ [e0, e1]
 freeVars (App  e0 e1   ) = Set.unions . map freeVars $ [e0, e1]
@@ -66,6 +68,7 @@ freeVars (If   e0 e1 e2) = Set.unions . map freeVars $ [e0, e1, e2]
 
 data Context = Hole
              | Perform0 Context
+             | Ann0 Ann Context
              | Cons0 Context Expr
              | Cons1 Expr Context
              | Tag0 Context Expr
@@ -98,6 +101,10 @@ split (Perform eff) = case split eff of
   Value -> Split Hole (Perform eff)
   Crash msg -> Crash msg
   Split ctx e -> Split (Perform0 ctx) e
+split (Ann a e) = case split e of
+  Value -> Split Hole (Ann a e)
+  Crash msg -> Crash msg
+  Split ctx e -> Split (Ann0 a ctx) e
 split (Cons h t) = splitHelper h t Cons0 Cons1 $ case t of
   -- when h and t are both values, we have to do an additional check:
   --   if t is not a list, then this call to cons has to be a redex (it will step to an error).
@@ -151,6 +158,7 @@ plug :: Context -> Expr -> Expr
 plug c v = case c of
   Hole -> v
   Perform0 eff -> Perform (plug eff v)
+  Ann0 a e -> Ann a (plug e v)
   Cons0 x y -> Cons (plug x v) y
   Cons1 x y -> Cons x (plug y v)
   Tag0 x y -> Tag (plug x v) y
@@ -175,6 +183,7 @@ step expr = case split expr of
 
 -- stepRoot assumes there is a redex at the root of the expr tree.
 stepRoot :: Expr -> Expr
+stepRoot (Ann _ e) = e
 stepRoot (Local _) = error "stepRoot assumes locals have already been substituted"
 stepRoot (Global x) = Error ("unbound global: " ++ x)
 stepRoot (Perform _) = error "stepRoot can't handle Perform"
@@ -427,6 +436,21 @@ runInDefs defs expr handler = loop expr
           Yield c e -> do
             e' <- handler e
             loop $ plug c e'
+
+-- TODO This is too strict; the entire action has to happen before you peek the results.
+-- Is there a better type of a generator-like thing?
+traceInDefs :: Monad m => [Def] -> Expr -> (Expr -> m Expr) -> m [Expr]
+traceInDefs defs expr handler = loop expr
+  where defs' = evalDefs defs
+        loop expr = case stepInDefs defs' expr of
+          Done -> return [expr]
+          Next e -> do
+            rest <- loop e
+            return (expr:rest)
+          Yield c e -> do
+            e' <- handler e
+            rest <- loop (plug c e')
+            return (expr:rest)
 
 testHandler :: Expr -> Writer String Expr
 testHandler (Perform (Lit (String s))) = do
