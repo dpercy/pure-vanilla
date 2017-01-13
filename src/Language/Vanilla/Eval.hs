@@ -2,6 +2,7 @@
 module Language.Vanilla.Eval where
 
 import Test.QuickCheck
+import Test.QuickCheck.Monadic (assert, run, monadicIO)
 import qualified Data.Map as Map
 import Data.Map (Map)
 import qualified Data.Set as Set
@@ -9,7 +10,10 @@ import Data.Set (Set)
 import GHC.Exts
 import Data.List (find)
 import Data.Void
+import Data.Maybe
+import Data.Functor.Identity
 import Control.Monad.Writer
+import Control.Exception (catch, NonTermination(..))
 
 import Language.Vanilla.Core
 import Language.Vanilla.Prims
@@ -172,12 +176,13 @@ step expr = case split expr of
   Value -> Done
   Crash msg -> Next (Error msg)
   Split c (Perform e) -> Yield c (Perform e)
+  Split c (Global x) -> Yield c (Global x)
   Split c e -> Next (plug c (stepRoot e))
 
 -- stepRoot assumes there is a redex at the root of the expr tree.
 stepRoot :: Expr -> Expr
 stepRoot (Local _) = error "stepRoot assumes locals have already been substituted"
-stepRoot (Global x) = Error ("unbound global: " ++ x)
+stepRoot (Global _) = error "stepRoot doesn't handle globals"
 stepRoot (Perform _) = error "stepRoot can't handle Perform"
 stepRoot (App (Global op) args) = case Map.lookup op prims of
   Nothing -> error "unreachable - if app/global is a redex, global must be a value - a prim."
@@ -204,15 +209,26 @@ stepRoot (Func _ _) = error "not a redex"
 stepRoot (Error _) = error "not a redex"
 stepRoot (Quote _) = error "not a redex"
 
-traceExpr :: Expr -> [Expr]
-traceExpr e = e:rest
+-- A YieldHandler tells the evaluator what to do when a step return a Yield.
+-- Yields can happen:
+--  - when a Global is the redex
+--  - when an unhandled (Perform eff) is the redex
+-- The one extra wrinkle is that in some contexts, a YieldHandler might need to
+-- do some IO (or other monad) action.
+type YieldHandler m = (Expr -> m Expr)
+
+traceExpr :: YieldHandler Identity -> Expr -> [Expr]
+traceExpr h e = e:rest
   where rest = case step e of
                 Done -> []
-                Next e' -> traceExpr e'
-                Yield c _ -> traceExpr (plug c (Error "unhandled effect at import time"))
+                Next e' -> traceExpr h e'
+                Yield c e' -> traceExpr h (plug c (runIdentity (h e')))
 
 evalExpr :: Expr -> Expr
-evalExpr e = last (traceExpr e)
+evalExpr e = last (traceExpr h e)
+  where h (Global _) = return $ Error "unbound global"
+        h (Perform _) = return $ Error "unhandled effect"
+        h _ = error "yielded a non-global, non-perform expression"
 
 
 prop_evalExprExample =
@@ -306,81 +322,93 @@ findActiveDef defs = case find (not . isDefDone) defs of
                -- If the redex in this def is not a global, this is the active def.
                Split _ _ -> OneActive (Def name expr)
 
+-- traceAndEvalDefs computes both the trace and the final value for every def.
+-- These have to be computed together,
+-- because the trace of one def can depend on the final value of another.
+traceAndEvalDefs :: [Def] -> (Map String [Expr], Map String Expr)
+traceAndEvalDefs defs = (traces, values)
+  where traces = Map.fromList (map traceDef defs)
+        traceDef (Def x e) = (x, traceExpr h e)
+        h :: YieldHandler Identity
+        h (Perform _) = return $ Error "unhandled effect at import time"
+        h (Global x) = return $ case Map.lookup x values of
+                                 Nothing -> Error ("unbound global: " ++ x)
+                                 Just v -> v
+        h _ = error "yielded a non-global, non-perform expression"
+        -- TODO cycle detection is not working
+        values = Map.map last traces
+-- TODO traceAndEvalDefs where you only care about the values is probably a space leak.
+-- Maybe GHC will deforest (last (big recursive thing)), but if not I can
+-- do that manually by letting the caller specify how to "cons" the results.
+-- if cons = \x y -> y then the x should be dropped.
 
 evalDefs :: [Def] -> [Def]
-evalDefs defs = case stepDefs defs of
-  Done -> defs
-  Next defs' -> evalDefs defs'
-  Yield void _ -> case void of
+evalDefs defs = map evalDef defs
+  where evalDef (Def x _) = (Def x (fromJust (Map.lookup x values)))
+        (_, values) = traceAndEvalDefs defs
 
-checkSteps :: Eq e => (e -> Step Void e) -> [e] -> Bool
-checkSteps stepper cases = cases == (head cases):(trace stepper (head cases))
+traceDefs :: [Def] -> Map String [Expr]
+traceDefs defs = fst (traceAndEvalDefs defs)
+
+prop_evalEmpty = traceDefs [] == Map.fromList []
+prop_evalEasy =
+  traceDefs [ Def "x" (App (Global "z") [42])
+            , Def "y" (Global "x")
+            , Def "z" (If (Lit $ Bool True) (Func [Var "a" 0] [Local (Var "a" 0)]) 456)
+            ]
+  == Map.fromList [
+    ("x", [ (App (Global "z") [42])
+          , (App (Func [Var "a" 0] [Local (Var "a" 0)]) [42])
+          , [42]
+          ]),
+    ("y", [ (Global "x")
+          , [42]
+          ]),
+    ("z", [ (If (Lit $ Bool True) (Func [Var "a" 0] [Local (Var "a" 0)]) 456)
+          , (Func [Var "a" 0] [Local (Var "a" 0)])
+          ])
+    ]
+
 {-
-  (and (map
-        (\(a, b) -> case stepper a of
-                     Done -> False
-                     Next b' -> b == b'
-                     Yield void _ -> case void of)
-        (zip cases (tail cases))))
-  && stepper (last cases) == Done
+detectLoop :: a -> IO Bool
+detectLoop thunk = (return $ thunk `seq` False) `catch` \NonTermination -> return True
+
+-- TODO detectLoop doesn't even work on an easy case
+prop_detectLoop = monadicIO $ do
+  v <- run $ detectLoop (let x = x in x)
+  assert v
+
+prop_evalCycle = monadicIO $ do
+  let traces = traceDefs [ Def "x" (App (Global "y") [42])
+                         , Def "y" (If (Lit $ Bool True) (Global "x") 456)
+                         ]
+  assert $ head (fromJust (Map.lookup "x" traces)) == (Global "x")
+  xLast <- run $ detectLoop (last (fromJust (Map.lookup "x" traces)))
+  assert $ xLast
+  yLast <- run $ detectLoop (last (fromJust (Map.lookup "y" traces)))
+  assert $ yLast
 -}
 
-trace stepper init =
-  case stepper init of
-   Done -> []
-   Next v -> v:(trace stepper v)
-   Yield c _ -> absurd c
-
-prop_evalEmpty = evalDefs [] == []
-prop_evalEasy = checkSteps stepDefs [
-  [ Def "x" (App (Global "z") [42])
-  , Def "y" (Global "x")
-  , Def "z" (If (Lit $ Bool True) (Func [Var "a" 0] [Local (Var "a" 0)]) 456)
-  ],
-  [ Def "x" (App (Global "z") [42])
-  , Def "y" (Global "x")
-  , Def "z" (Func [Var "a" 0] [Local (Var "a" 0)])
-  ],
-  [ Def "x" (App (Func [Var "a" 0] [Local (Var "a" 0)]) [42])
-  , Def "y" (Global "x")
-  , Def "z" (Func [Var "a" 0] [Local (Var "a" 0)])
-  ],
-  [ Def "x" [42]
-  , Def "y" (Global "x")
-  , Def "z" (Func [Var "a" 0] [Local (Var "a" 0)])
-  ],
-  [ Def "x" [42]
-  , Def "y" [42]
-  , Def "z" (Func [Var "a" 0] [Local (Var "a" 0)])
-  ]
-  ]
-
-prop_evalCycle = checkSteps stepDefs [
- [ Def "x" (App (Global "y") [42]) , Def "y" (If (Lit $ Bool True) (Global "x") 456)],
- [ Def "x" (App (Global "y") [42]) , Def "y" (Global "x")],
- [ Def "x" (Error "cyclic definition: x") , Def "y" (Global "x")],
- [ Def "x" (Error "cyclic definition: x") , Def "y" (Error "depends on a failed def: x")]
- ]
 
 -- Programs where a global reference is under a function parameter with the same name
 -- are ok, because we distinguish between Global and Local vars.
 -- This is especially important when this global-under-same-local case
 -- only occurs after the program steps (as opposed to being present in the source).
 prop_evalShadowGlobal =
-  stepDefs [ Def "x" (Lit $ Num 7)
+  evalDefs [ Def "x" (Lit $ Num 7)
            , Def "y" (App
                       (Func [Var "v" 0] (Func [Var "x" 0] (Local (Var "v" 0))))
                       [(Func [] (Global "x"))])
            ]
-  == Next [ Def "x" (Lit $ Num 7)
-            -- Note the capitalized Func constructor:
-            -- this Global "x" doesn't refer to the parameter "x".
-          , Def "y" (Func [Var "x" 0] (Func [] (Global "x")))
-          ]
+  == [ Def "x" (Lit $ Num 7)
+       -- Note the capitalized Func constructor:
+       -- this Global "x" doesn't refer to the parameter "x".
+     , Def "y" (Func [Var "x" 0] (Func [] (Global "x")))
+     ]
 
 prop_evalPrim =
-  stepDefs [ Def "x" (App (Global "+") [3, 4]) ]
-  == Next  [ Def "x" 7 ]
+  evalDefs [ Def "x" (App (Global "+") [3, 4]) ]
+  == [ Def "x" 7 ]
 
 prop_evenOdd = lookupDef "result" (evalDefs
   [ Def "isEven" (Func [Var "n" 0]
@@ -401,6 +429,7 @@ prop_stepYield_ex1 =
   step (Cons 1 (Perform 2))
   == Yield (Cons1 1 Hole) (Perform 2)
 
+-- TODO get rid of this stuff
 stepGlobal :: [Def] -> Expr -> Expr
 stepGlobal defs (Global g) = case lookupDef g defs of
   Nothing -> Error $ "depends on a missing def: " ++ g
