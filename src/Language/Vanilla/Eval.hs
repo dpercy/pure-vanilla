@@ -15,6 +15,7 @@ import Language.Vanilla.Core
 import Language.Vanilla.Prims
 
 
+-- subst does capture-avoiding substitution, and also renames every binding to avoid shadowing.
 subst :: InScope -> Expr -> Map Var Expr -> Expr
 subst scope term sub =
   let recur term = subst scope term sub in
@@ -203,11 +204,16 @@ stepRoot (Func _ _) = error "not a redex"
 stepRoot (Error _) = error "not a redex"
 stepRoot (Quote _) = error "not a redex"
 
+traceExpr :: Expr -> [Expr]
+traceExpr e = e:rest
+  where rest = case step e of
+                Done -> []
+                Next e' -> traceExpr e'
+                Yield c _ -> traceExpr (plug c (Error "unhandled effect at import time"))
+
 evalExpr :: Expr -> Expr
-evalExpr e = case step e of
-  Done -> e
-  Next e' -> evalExpr e'
-  Yield c _ -> evalExpr (plug c (Error "unhandled effect at import time"))
+evalExpr e = last (traceExpr e)
+
 
 prop_evalExprExample =
   (evalExpr (App (Func [Var "x" 0, Var "y" 0, Var "z" 0]

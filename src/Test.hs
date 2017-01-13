@@ -9,16 +9,13 @@ import qualified Language.Vanilla.Server (test)
 import qualified Language.Vanilla.JS (test)
 
 import Language.Vanilla.Core
-import Language.Vanilla.Eval hiding (test, main)
-import Language.Vanilla.Parser hiding (test, main)
-import Language.Vanilla.Printer hiding (test, main)
-import Language.Vanilla.Server hiding (test, main)
-import Language.Vanilla.JS hiding (test, main)
+import Language.Vanilla.Eval hiding (test)
 
 fromNext (Next e) = e
+fromNext _ = error "fromNext a non-Next"
 
 nthStep :: [Def] -> Expr -> Integer -> Expr
-nthStep defs e 0 = e
+nthStep _   e 0 = e
 nthStep defs e i = nthStep defs (fromNext (stepInDefs defs e)) (i-1)
 
 
