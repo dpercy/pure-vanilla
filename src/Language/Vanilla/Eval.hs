@@ -322,33 +322,64 @@ findActiveDef defs = case find (not . isDefDone) defs of
                -- If the redex in this def is not a global, this is the active def.
                Split _ _ -> OneActive (Def name expr)
 
--- traceAndEvalDefs computes both the trace and the final value for every def.
--- These have to be computed together,
--- because the trace of one def can depend on the final value of another.
-traceAndEvalDefs :: [Def] -> (Map String [Expr], Map String Expr)
-traceAndEvalDefs defs = (traces, values)
-  where traces = Map.fromList (map traceDef defs)
-        traceDef (Def x e) = (x, traceExpr h e)
-        h :: YieldHandler Identity
-        h (Perform _) = return $ Error "unhandled effect at import time"
-        h (Global x) = return $ case Map.lookup x values of
-                                 Nothing -> Error ("unbound global: " ++ x)
-                                 Just v -> v
-        h _ = error "yielded a non-global, non-perform expression"
-        -- TODO cycle detection is not working - try array instead of Map?
-        values = Map.map last traces
--- TODO traceAndEvalDefs where you only care about the values is probably a space leak.
--- Maybe GHC will deforest (last (big recursive thing)), but if not I can
--- do that manually by letting the caller specify how to "cons" the results.
--- if cons = \x y -> y then the x should be dropped.
+-- A Trace is not quite a list of expressions:
+-- it's a list of expressions that sometimes has to stop and ask for the value of a Global.
+data Trace = Steps [Expr] | ReadGlobal [Expr] String (Expr -> Trace)
+instance Show Trace where
+  show (Steps es) = "Steps " ++ show es
+  show (ReadGlobal es x k) = "ReadGlobal " ++ show es ++ " " ++ show x ++ " (\\v -> ...)"
+emptyTrace = Steps []
+consTrace e tr = case tr of
+  Steps es -> Steps (e:es)
+  ReadGlobal es x k -> ReadGlobal (e:es) x k
+yieldTrace x k = ReadGlobal [] x k
+isYield tr = case tr of
+  Steps _ -> False
+  ReadGlobal _ _ _ -> True
+appendTrace :: Foldable list => list Expr -> Trace -> Trace
+appendTrace es tr = foldr (consTrace) tr es
 
-evalDefs :: [Def] -> [Def]
-evalDefs defs = map evalDef defs
-  where evalDef (Def x _) = (Def x (fromJust (Map.lookup x values)))
-        (_, values) = traceAndEvalDefs defs
+generateTracesForDefs :: [Def] -> (Map String Trace)
+generateTracesForDefs defs = traces
+  where traces = Map.fromList (map traceDef defs)
+        traceDef (Def x e) = (x, t e)
+        t :: Expr -> Trace
+        t e = consTrace e rest
+          where rest = case step e of
+                  Done -> emptyTrace
+                  Next e' -> t e'
+                  Yield c (Perform _) -> t (plug c (Error "unhandled effect at import time"))
+                  Yield c (Global x) -> yieldTrace x $ \v -> t (plug c v)
 
 traceDefs :: [Def] -> Map String [Expr]
-traceDefs defs = fst (traceAndEvalDefs defs)
+traceDefs defs = close (generateTracesForDefs defs)
+  where close :: Map String Trace -> Map String [Expr]
+        -- The idea with close is to step all the defs, until some defs block.
+        -- Then every def is either done, runnable, or deadlocked.
+        -- Resume the runnable ones, kill the deadlocked ones, and continue.
+        close defs =
+          let blocked = Map.filter isYield defs in
+          -- let deadlocked = error "TODO find cycles" in
+          if Map.size blocked == 0
+          then Map.map (\(Steps es) -> es) defs
+          else close (Map.map continue defs)
+          where continue tr@(Steps _) = tr
+                continue tr@(ReadGlobal es x k) =
+                  case fromJust (Map.lookup x defs) of
+                   -- if x is not done yet, the ReadGlobal blocks
+                   ReadGlobal _ _ _ -> tr
+                   -- if x is done, plug in the value (or an error, if x failed)
+                   Steps vs -> case last vs of
+                     Error _ -> appendTrace es (k (Error ("depends on a failed def: " ++ x)))
+                     e -> appendTrace es (k e)
+           
+
+
+-- Be warned: evalDefs is undefined if any def fails to terminate.
+evalDefs :: [Def] -> [Def]
+evalDefs defs = map (\(Def x _) -> (Def x (fromJust (Map.lookup x traces)))) defs
+  where traces = Map.map last (traceDefs defs)
+
 
 prop_evalEmpty = once $ traceDefs [] == Map.fromList []
 prop_evalEasy = once $
