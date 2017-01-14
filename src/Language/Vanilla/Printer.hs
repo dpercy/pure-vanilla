@@ -41,6 +41,9 @@ prop_incName_ex1 = once $ incName "x0" == "x1"
 prop_incName_ex2 = once $ incName "x9" == "x10"
 prop_incName_ex3 = once $ incName "x" == "x1"
 
+showTrace :: [(String, [Expr])] -> Doc
+showTrace trace = showDefs (concatMap f trace)
+  where f (x, es) = map (Def x) es
 
 showDefs :: [Def] -> Doc
 showDefs defs = vcat $ intersperse "" $ map showDef defs
@@ -88,6 +91,7 @@ showExpr (App f a) = case f of
   -- TODO do this more generally
   Global "+" -> showInfix "+" a
   Global "-" -> showInfix "-" a
+  Global "<" -> showInfix "<" a
   _ -> se f <> showArgs a
         
 showExpr (If t c a) = sep [ "if" <+> se t

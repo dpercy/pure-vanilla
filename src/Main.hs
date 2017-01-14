@@ -6,7 +6,10 @@ import qualified Language.Vanilla.Server
 
 import qualified Language.Vanilla.Parser
 import Language.Vanilla.Core (Def(..), Expr(..), Atom(..))
-import Language.Vanilla.Eval (runInDefs)
+import Language.Vanilla.Eval (runInDefs, traceDefs)
+import Language.Vanilla.Printer (showTrace)
+
+import qualified Data.Map as Map
 
 main :: IO ()
 main = do
@@ -14,8 +17,15 @@ main = do
   case args of
    ["serve"] -> Language.Vanilla.Server.main
    ["interact", file] -> interactMain file
-   _ -> error "bad usage: should be   serve | interact <file>"
+   ["trace", file] -> traceMain file
+   _ -> error "bad usage: should be   serve | interact <file> | trace <file>"
 
+traceMain :: String -> IO ()
+traceMain file = do
+  contents <- readFile file
+  let prog = Language.Vanilla.Parser.pp contents :: [Def]
+  let trace = traceDefs prog
+  putStrLn . show . showTrace $ (Map.toList trace)
 
 
 interactMain :: String -> IO ()
