@@ -2,7 +2,6 @@
 module Language.Vanilla.Eval where
 
 import Test.QuickCheck
-import Test.QuickCheck.Monadic (assert, run, monadicIO)
 import qualified Data.Map as Map
 import Data.Map (Map)
 import qualified Data.Set as Set
@@ -13,7 +12,7 @@ import Data.Void
 import Data.Maybe
 import Data.Functor.Identity
 import Control.Monad.Writer
-import Control.Exception (catch, NonTermination(..))
+import Data.Graph
 
 import Language.Vanilla.Core
 import Language.Vanilla.Prims
@@ -327,15 +326,15 @@ findActiveDef defs = case find (not . isDefDone) defs of
 data Trace = Steps [Expr] | ReadGlobal [Expr] String (Expr -> Trace)
 instance Show Trace where
   show (Steps es) = "Steps " ++ show es
-  show (ReadGlobal es x k) = "ReadGlobal " ++ show es ++ " " ++ show x ++ " (\\v -> ...)"
+  show (ReadGlobal es x _) = "ReadGlobal " ++ show es ++ " " ++ show x ++ " (\\v -> ...)"
 emptyTrace = Steps []
 consTrace e tr = case tr of
   Steps es -> Steps (e:es)
   ReadGlobal es x k -> ReadGlobal (e:es) x k
 yieldTrace x k = ReadGlobal [] x k
-isYield tr = case tr of
-  Steps _ -> False
-  ReadGlobal _ _ _ -> True
+blockedOn tr = case tr of
+  Steps _ -> Nothing
+  ReadGlobal _ x _ -> Just x
 appendTrace :: Foldable list => list Expr -> Trace -> Trace
 appendTrace es tr = foldr (consTrace) tr es
 
@@ -350,6 +349,7 @@ generateTracesForDefs defs = traces
                   Next e' -> t e'
                   Yield c (Perform _) -> t (plug c (Error "unhandled effect at import time"))
                   Yield c (Global x) -> yieldTrace x $ \v -> t (plug c v)
+                  Yield _ _ -> error "yielded a non-effect, non-global"
 
 traceDefs :: [Def] -> Map String [Expr]
 traceDefs defs = close (generateTracesForDefs defs)
@@ -358,21 +358,30 @@ traceDefs defs = close (generateTracesForDefs defs)
         -- Then every def is either done, runnable, or deadlocked.
         -- Resume the runnable ones, kill the deadlocked ones, and continue.
         close defs =
-          let blocked = Map.filter isYield defs in
-          -- let deadlocked = error "TODO find cycles" in
+          let blocked = Map.mapMaybe blockedOn defs in
+          let deadlocked = findCycles (Map.toList blocked)
+                where findCycles :: [(String, String)] -> [String]
+                      findCycles m = concat $ filter nontrivial $ map flattenSCC (stronglyConnComp (map (\(k, v) -> (k, k, [v])) m))
+                        where nontrivial xs = length xs > 1
+          in
           if Map.size blocked == 0
           then Map.map (\(Steps es) -> es) defs
-          else close (Map.map continue defs)
-          where continue tr@(Steps _) = tr
-                continue tr@(ReadGlobal es x k) =
-                  case fromJust (Map.lookup x defs) of
-                   -- if x is not done yet, the ReadGlobal blocks
-                   ReadGlobal _ _ _ -> tr
-                   -- if x is done, plug in the value (or an error, if x failed)
-                   Steps vs -> case last vs of
-                     Error _ -> appendTrace es (k (Error ("depends on a failed def: " ++ x)))
-                     e -> appendTrace es (k e)
-           
+          else let
+            resume :: Trace -> Trace
+            resume tr@(Steps _) = tr
+            resume tr@(ReadGlobal es x k) =
+              if x `elem` deadlocked
+              then appendTrace es (k (Error "cyclic definitions"))
+              else
+                case fromJust (Map.lookup x defs) of
+                 -- if x is not done yet, the ReadGlobal blocks
+                 ReadGlobal _ _ _ -> tr
+                 -- if x is done, plug in the value (or an error, if x failed)
+                 Steps vs -> case last vs of
+                   Error _ -> appendTrace es (k (Error ("depends on a failed def: " ++ x)))
+                   e -> appendTrace es (k e)
+            in close (Map.map resume defs)
+
 
 
 -- Be warned: evalDefs is undefined if any def fails to terminate.
@@ -400,25 +409,21 @@ prop_evalEasy = once $
           ])
     ]
 
-{-
-detectLoop :: a -> IO Bool
-detectLoop thunk = (return $ thunk `seq` False) `catch` \NonTermination -> return True
 
--- TODO detectLoop doesn't even work on an easy case
-prop_ detectLoop = once $ monadicIO $ do
-  v <- run $ detectLoop (let x = x in x)
-  assert v
-
-prop_ evalCycle = monadicIO $ do
-  let traces = traceDefs [ Def "x" (App (Global "y") [42])
-                         , Def "y" (If (Lit $ Bool True) (Global "x") 456)
-                         ]
-  assert $ head (fromJust (Map.lookup "x" traces)) == (Global "x")
-  xLast <- run $ detectLoop (last (fromJust (Map.lookup "x" traces)))
-  assert $ xLast
-  yLast <- run $ detectLoop (last (fromJust (Map.lookup "y" traces)))
-  assert $ yLast
--}
+prop_evalCycle = once $
+  traceDefs [ Def "x" (App (Global "y") [42])
+            , Def "y" (If (Lit $ Bool True) (Global "x") 456)
+            ]
+  == Map.fromList [
+    ("x", [ (App (Global "y") [42])
+          , (App (Error "cyclic definitions") [42])
+          , (Error "cyclic definitions")
+          ]),
+    ("y", [ (If (Lit $ Bool True) (Global "x") 456)
+          , (Global "x")
+          , (Error "cyclic definitions")
+          ])
+    ]
 
 
 -- Programs where a global reference is under a function parameter with the same name
