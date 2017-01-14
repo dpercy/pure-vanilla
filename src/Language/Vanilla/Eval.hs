@@ -134,7 +134,7 @@ splitHelper x y cleft cright ifvalue = case split x of
   Split c e -> Split (cleft c y) e
 
 
-prop_split_ex1 =
+prop_split_ex1 = once $
   split (Cons
          [7, 8]
          (Cons
@@ -146,7 +146,7 @@ prop_split_ex1 =
        (Cons0 Hole (Lit Null)))
       (App 1 2))
 
-prop_split_ex2 =
+prop_split_ex2 = once $
   split (App 1 2)
   == (Split Hole (App 1 2))
 
@@ -231,13 +231,13 @@ evalExpr e = last (traceExpr h e)
         h _ = error "yielded a non-global, non-perform expression"
 
 
-prop_evalExprExample =
+prop_evalExprExample = once $
   (evalExpr (App (Func [Var "x" 0, Var "y" 0, Var "z" 0]
                   [Local (Var "x" 0), Local (Var "z" 0), Local (Var "y" 0)])
              [0, 1, 2]))
   == [0, 2, 1]
 
-prop_evalExprClosure =
+prop_evalExprClosure = once $
   -- note that Var "y" 42 does not get renamed, because it doesn't need to be renamed,
   -- because there is no other "y" above or below it in scope.
   (evalExpr (App (Func [Var "x" 0] (Func [Var "y" 42] [Local (Var "x" 0), Local (Var "y" 42)])) [3]))
@@ -335,7 +335,7 @@ traceAndEvalDefs defs = (traces, values)
                                  Nothing -> Error ("unbound global: " ++ x)
                                  Just v -> v
         h _ = error "yielded a non-global, non-perform expression"
-        -- TODO cycle detection is not working
+        -- TODO cycle detection is not working - try array instead of Map?
         values = Map.map last traces
 -- TODO traceAndEvalDefs where you only care about the values is probably a space leak.
 -- Maybe GHC will deforest (last (big recursive thing)), but if not I can
@@ -350,8 +350,8 @@ evalDefs defs = map evalDef defs
 traceDefs :: [Def] -> Map String [Expr]
 traceDefs defs = fst (traceAndEvalDefs defs)
 
-prop_evalEmpty = traceDefs [] == Map.fromList []
-prop_evalEasy =
+prop_evalEmpty = once $ traceDefs [] == Map.fromList []
+prop_evalEasy = once $
   traceDefs [ Def "x" (App (Global "z") [42])
             , Def "y" (Global "x")
             , Def "z" (If (Lit $ Bool True) (Func [Var "a" 0] [Local (Var "a" 0)]) 456)
@@ -374,11 +374,11 @@ detectLoop :: a -> IO Bool
 detectLoop thunk = (return $ thunk `seq` False) `catch` \NonTermination -> return True
 
 -- TODO detectLoop doesn't even work on an easy case
-prop_detectLoop = monadicIO $ do
+prop_ detectLoop = once $ monadicIO $ do
   v <- run $ detectLoop (let x = x in x)
   assert v
 
-prop_evalCycle = monadicIO $ do
+prop_ evalCycle = monadicIO $ do
   let traces = traceDefs [ Def "x" (App (Global "y") [42])
                          , Def "y" (If (Lit $ Bool True) (Global "x") 456)
                          ]
@@ -394,7 +394,7 @@ prop_evalCycle = monadicIO $ do
 -- are ok, because we distinguish between Global and Local vars.
 -- This is especially important when this global-under-same-local case
 -- only occurs after the program steps (as opposed to being present in the source).
-prop_evalShadowGlobal =
+prop_evalShadowGlobal = once $
   evalDefs [ Def "x" (Lit $ Num 7)
            , Def "y" (App
                       (Func [Var "v" 0] (Func [Var "x" 0] (Local (Var "v" 0))))
@@ -406,11 +406,11 @@ prop_evalShadowGlobal =
      , Def "y" (Func [Var "x" 0] (Func [] (Global "x")))
      ]
 
-prop_evalPrim =
+prop_evalPrim = once $
   evalDefs [ Def "x" (App (Global "+") [3, 4]) ]
   == [ Def "x" 7 ]
 
-prop_evenOdd = lookupDef "result" (evalDefs
+prop_evenOdd = once $ lookupDef "result" (evalDefs
   [ Def "isEven" (Func [Var "n" 0]
                   (If (App (Global "<") [Local (Var "n" 0), 1])
                    (Lit $ Bool True)
@@ -425,7 +425,7 @@ prop_evenOdd = lookupDef "result" (evalDefs
 
 
 
-prop_stepYield_ex1 =
+prop_stepYield_ex1 = once $
   step (Cons 1 (Perform 2))
   == Yield (Cons1 1 Hole) (Perform 2)
 
@@ -469,7 +469,7 @@ testHandler (Perform (Lit (String s))) = do
   return (Lit $ String "ok")
 testHandler _ = return $ Error "testHandler can't handle this effect"
 
-prop_runMain_ex1 =
+prop_runMain_ex1 = once $
   runWriter (runMain [ Def "main" (Func [] (Perform (Lit $ String "hi"))) ] testHandler)
   == ((Lit $ String "ok"), "hi")
 

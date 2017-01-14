@@ -34,12 +34,12 @@ consNoCollide ctx x xs = if x `elem` xs || x `elem` ctx
 appendNoCollide :: [String] -> [String] -> [String] -> [String]
 appendNoCollide ctx left right = foldr (consNoCollide ctx) right left
 
-prop_appendNoCollide_ex1 = appendNoCollide [] ["x", "x", "y", "z"] ["z", "x"]
+prop_appendNoCollide_ex1 = once $ appendNoCollide [] ["x", "x", "y", "z"] ["z", "x"]
                            == ["x2", "x1", "y", "z1", "z", "x"]
 
-prop_incName_ex1 = incName "x0" == "x1"
-prop_incName_ex2 = incName "x9" == "x10"
-prop_incName_ex3 = incName "x" == "x1"
+prop_incName_ex1 = once $ incName "x0" == "x1"
+prop_incName_ex2 = once $ incName "x9" == "x10"
+prop_incName_ex3 = once $ incName "x" == "x1"
 
 
 showDefs :: [Def] -> Doc

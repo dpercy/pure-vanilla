@@ -101,7 +101,7 @@ trAtom (Num n) = show (fromRational n :: Double)
 trAtom (String s) = show s
 
 
-prop_example =
+prop_example = once $
   trResidualProgram [Def "f" (Func [Var "x" 0] (App (Global "+") (Cons (Local (Var "x" 0)) (Cons 3 (Lit Null)))))]
   == unlines [ "(function() {"
              , "var f = function(_x_0) { return (_x_0 + 3.0); };"

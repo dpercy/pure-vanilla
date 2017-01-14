@@ -319,10 +319,10 @@ parseProgram s = fixScope `fmap` parse (spaces >> program) "<in>" s
 parseExpr s = fixExprScope emptyScope `fmap` parse (spaces >> expr) "<in>" s
 
 
-prop_empty =
+prop_empty = once $
   pp "" == []
   
-prop_example =
+prop_example = once $
   pp " x = 1 ; y = \"wut\" ; z = 1/2 ; q = 3.5"
    == [ Def "x" 1
       , Def "y" (Lit $ String "wut")
@@ -330,45 +330,45 @@ prop_example =
       , Def "q" 3.5
       ]
 
-prop_newline =
+prop_newline = once $
   pp "x=1\ny=2"
   == [ Def "x" 1, Def "y" 2 ]
-prop_newlines =
+prop_newlines = once $
   pp "x=1\n\n\ny=2"
   == [ Def "x" 1, Def "y" 2 ]
-prop_start_newlines =
+prop_start_newlines = once $
   pp "  \n   \n\n \n  x = 1"
   == [Def "x" 1]
-prop_end_newlines =
+prop_end_newlines = once $
   pp "x=1     \n  \n  \n\n"
   == [Def "x" 1]
-prop_only_newlines =
+prop_only_newlines = once $
   pp "   \n \n \n\n  "
   == []
 
-prop_func =
+prop_func = once $
   pp "v = (x) -> cons(x, y)"
   == [ Def "v" (Func [Var "x" 0] (Cons (Local (Var "x" 0)) (Global "y"))) ]
 
-prop_params =
+prop_params = once $
   pp "f = (x, y, ++) -> 1"
   == [ Def "f" (Func [Var "x" 0, Var "y" 0, Var "++" 0] 1) ]
 
-prop_call =
+prop_call = once $
   pp "v = f(x, 1)"
   == [ Def "v" (App (Global "f") [(Global "x"), 1]) ]
 
-prop_call_curry =
+prop_call_curry = once $
   pp "v = f(x, 1)()(y)"
   == [ Def "v" (App (App (App (Global "f") [Global "x", 1]) []) [Global "y"]) ]
 
-prop_prefix =
+prop_prefix = once $
   pp "f = () -> (- x)"
   == [  Def "f" (Func []
                  (App (Global "-") [Global "x"]))
      ]
 
-prop_ops =
+prop_ops = once $
   pp "f = (++, <|>) -> (<|> (1 ++ 2 ++ 3))"
   == [ Def "f" (Func [Var "++" 0, Var "<|>" 0]
                 (App (Local (Var "<|>" 0))
@@ -376,41 +376,41 @@ prop_ops =
                    [1, 2, 3])]))
      ]
 
-prop_letin =
+prop_letin = once $
   pp "v = let x = 1 in (x + 2)"
   == [ Def "v" (App (Func [Var "x" 0] (App (Global "+")
                                        [Local (Var "x" 0), 2]))
                 [1]) ]
 
-prop_special_functions =
+prop_special_functions = once $
   pp "f = perform(tag(1, cons(2, 3)))"
   == [ Def "f" (Perform (Tag 1 (Cons 2 3))) ]
 
-prop_conditionals =
+prop_conditionals = once $
   pp "v = if 1 then 2 else if 3 then 4 else 5"
   == [ Def "v" (If 1 2 (If 3 4 5)) ]
 
-prop_prims =
+prop_prims = once $
   pp "v = 1 < 2"
   == [ Def "v" (App (Global "<") [1, 2]) ]
 
-prop_if_has_lower_precedence_than_infix =
+prop_if_has_lower_precedence_than_infix = once $
   pp "v = if 1 then 2 else 3 + 4"
   == [ Def "v" (If 1 2 (App (Global "+") [3, 4])) ]
 
-prop_if_has_lower_precedence_than_apply =
+prop_if_has_lower_precedence_than_apply = once $
   pp "v = if 1 then 2 else f(3)"
   == [ Def "v" (If 1 2 (App (Global "f") [3])) ]
 
-prop_if_has_lower_precedence_than_apply_then_infix =
+prop_if_has_lower_precedence_than_apply_then_infix = once $
   pp "v = if 1 then 2 else 3(4) + 5"
   == [ Def "v" (If 1 2 (App (Global "+") [App 3 [4], 5])) ]
 
-prop_shadow =
+prop_shadow = once $
   pp "f = (x) -> (x) -> x"
   == [ Def "f" (Func [Var "x" 0] (Func [Var "x" 1] (Local (Var "x" 1)))) ]
 
-prop_quote =
+prop_quote = once $
   pp "stx = :( (x) -> x )"
   == [ Def "stx" (Quote (Func [Var "x" 0] (Local (Var "x" 0)))) ]
 

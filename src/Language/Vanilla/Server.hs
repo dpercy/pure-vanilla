@@ -46,16 +46,16 @@ unionDefs a b = foldr f [] (a ++ b)
                            then defs
                            else (Def x e):defs
 
-prop_union_empty = unionDefs [] [] == []
-prop_union_left = unionDefs [Def "x" 1, Def "y" 2] [] == [Def "x" 1, Def "y" 2]
-prop_union_right = unionDefs [] [Def "x" 1, Def "y" 2] == [Def "x" 1, Def "y" 2]
-prop_union_both =
+prop_union_empty = once $ unionDefs [] [] == []
+prop_union_left = once $ unionDefs [Def "x" 1, Def "y" 2] [] == [Def "x" 1, Def "y" 2]
+prop_union_right = once $ unionDefs [] [Def "x" 1, Def "y" 2] == [Def "x" 1, Def "y" 2]
+prop_union_both = once $
   unionDefs [Def "x" 1, Def "y" 2] [Def "a" 3, Def "b" 4]
   == [Def "x" 1, Def "y" 2, Def "a" 3, Def "b" 4]
-prop_union_right_wins =
+prop_union_right_wins = once $
   unionDefs [Def "y" 3, Def "x" 4] [Def "x" 1, Def "y" 2]
   == [Def "x" 1, Def "y" 2]
-prop_union_full =
+prop_union_full = once $
     (unionDefs
      [Def "a" 1, Def "b" 2, Def "c" 3, Def "d" 4]
      [Def "e" 5, Def "c" 0, Def "b" 0, Def "f" 6]
