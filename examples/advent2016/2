@@ -1,11 +1,24 @@
 
-main = (input) -> pretty(eval(initialState, parse(input)))
+# TODO this should evaluate to [2, 0] but I get [3, 0]
+example = guardStep(isValid_part1)([2, 0], "R")
+
+main = (input) -> pretty(eval(initialState, isValid_part1, parse(input)))
 
 parse = (input) -> map(parseLine, splitlines(input))
 parseLine = (line) -> filter(nonempty, split(line, ""))
 nonempty = (s) -> 0 < length(s)
 
 initialState = [1, 1] # x across, y down
+
+guardStep = (isValid) -> (state, letter) ->
+  let newState = step(state, letter) in
+  if isValid(newState) then newState
+  else state
+isValid_part1 = (state) ->
+  let x = first(state) in
+  let y = first(rest(state)) in
+  foldl(and, true, [ (-1) < x, x < 3,
+                     (-1) < y, y < 3, ])
 
 step = (state, letter) ->
   let x = first(state) in
@@ -15,21 +28,15 @@ step = (state, letter) ->
   else if letter == "L" then [dec(x), y]
   else if letter == "R" then [inc(x), y]
   else error("bad letter")
-inc = (n) ->
-  let nn = n + 1 in
-  if 2 < nn then 2
-  else nn
-dec = (n) ->
-  let nn = n - 1 in
-  if nn < 0 then 0
-  else nn
+inc = (n) -> n + 1
+dec = (n) -> n - 1
 
-eval = (state, lines) ->
+eval = (state, isValid, lines) ->
   if isEmpty(lines) then []
-  else let newState = evalLine(state, first(lines)) in
-         cons(newState, eval(newState, rest(lines)))
+  else let newState = evalLine(state, isValid, first(lines)) in
+         cons(newState, eval(newState, isValid, rest(lines)))
 
-evalLine = (state, line) -> foldl(step, state, line)
+evalLine = (state, isValid, line) -> foldl(guardStep(isValid), state, line)
 
 pretty = (states) -> foldl((a, b) -> strcat(a, b), "", map(prettyState, states))
 prettyState = (state) ->
@@ -52,3 +59,7 @@ foldl = (f, init, lst) ->
   else foldl(f, f(init, first(lst)), rest(lst))
 
 cons = (head, tail) -> [head, ...tail]
+
+true = 0 == 0
+false = 0 < 0
+and = (a, b) -> if a then b else false
