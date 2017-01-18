@@ -11,6 +11,7 @@ import Data.Char
 import Data.Ratio
 import Data.Maybe
 import qualified Data.Map as Map
+import GHC.Exts (fromList)
 
 {-
 
@@ -251,10 +252,13 @@ lambda = do p <- try $ do p <- params
 
 call :: Expr -> Parser Expr
 call callee = do args <- parens (between (optional tok_newline) (optional tok_newline)
-                                 (expr `sepEndBy` (tok_comma >> optional tok_newline)))
+                                 (commaSep expr))
                  return $ case callee of
                            Local op -> app op args
                            _ -> App callee (foldr Cons (Lit Null) args)
+
+commaSep :: Parser a -> Parser [a]
+commaSep p = p `sepEndBy` (tok_comma >> optional tok_newline)
 
 quoteExpr :: Parser Expr
 quoteExpr = do tok_colon
@@ -263,12 +267,14 @@ quoteExpr = do tok_colon
 
 letExpr :: Parser Expr
 letExpr = do keyword "let"
-             v <- variable
-             tok_equals
-             e <- expr
+             binds <- commaSep $ do v <- variable
+                                    tok_equals
+                                    e <- expr
+                                    return (v, e)
+             let (vs, es) = unzip binds
              keyword "in" ; optional tok_newline
              b <- expr
-             return $ (App (Func [v] b) [e])
+             return $ (App (Func vs b) (fromList es))
 
 -- since the else part is mandatory,
 -- there should be no ambiguity when nesting ifs.

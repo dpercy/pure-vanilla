@@ -11,6 +11,7 @@ import Data.Char
 import Data.String
 import Data.List
 import Data.Ratio
+import GHC.Exts (toList)
 
 instance IsString Doc where
   fromString = text
@@ -84,9 +85,15 @@ showExpr (Perform eff) = "perform(" <> se eff <> ")"
 showExpr (Tag k v) = "tag(" <> se k <> ", " <> se v <> ")"
 showExpr (Func params body) = hang 2 $ sep [ paramsDoc <+> "->", se body ]
   where paramsDoc = parens $ sep $ punctuate "," $ map showVar params
-showExpr (App (Func [x] body) [e]) = sep [ hsep [ "let", showVar x, "=", se e, "in" ]
-                                         , se body
-                                         ]
+showExpr (App (Func xs body) es) = sep [ "let"
+                                         <+> sep (punctuate ","
+                                                  (zipWith showBind xs
+                                                   (toList es)))
+                                         <+> "in"
+                                       , se body
+                                       ]
+  where showBind :: Var -> Expr -> Doc
+        showBind x e = showVar x <+> "=" <+> se e
 showExpr (App f a) = case f of
   -- TODO do this more generally
   Global "+" -> showInfix "+" a
