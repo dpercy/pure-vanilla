@@ -8,7 +8,6 @@ import qualified Data.Set as Set
 import Data.Set (Set)
 import GHC.Exts
 import Data.List (find)
-import Data.Void
 import Data.Maybe
 import Data.Functor.Identity
 import Control.Monad.Writer
@@ -217,11 +216,16 @@ stepRoot (Quote _) = error "not a redex"
 type YieldHandler m = (Expr -> m Expr)
 
 traceExpr :: YieldHandler Identity -> Expr -> [Expr]
-traceExpr h e = e:rest
-  where rest = case step e of
-                Done -> []
-                Next e' -> traceExpr h e'
-                Yield c e' -> traceExpr h (plug c (runIdentity (h e')))
+traceExpr h e = runIdentity (traceExprM h e)
+
+traceExprM :: Monad m => YieldHandler m -> Expr -> m [Expr]
+traceExprM h e = do rest <- computeRest
+                    return (e:rest)
+  where computeRest = case step e of
+                       Done -> return []
+                       Next e' -> traceExprM h e'
+                       Yield c e' -> do e'' <- h e'
+                                        traceExprM h (plug c e'')
 
 evalExpr :: Expr -> Expr
 evalExpr e = last (traceExpr h e)
@@ -253,17 +257,6 @@ isDefDone (Def _ expr) = case split expr of
   Value -> True
   Crash _ -> False
   Split _ _ -> False
-
-
--- stepDefs steps a top-level set of definitions once.
-stepDefs :: [Def] -> Step Void [Def]
-stepDefs defs = case findActiveDef defs of
-  AllDone -> Done
-  Cycle name -> Next $ updateDef name (Error $ "cyclic definition: " ++ name) defs
-  OneActive (Def name expr) -> case stepInDefs defs expr of
-    Done -> error "unreachable - active def can't be a value"
-    Next e -> Next $ updateDef name e defs
-    Yield c _ -> Next $ updateDef name (plug c (Error "unhandled effect at import time")) defs
 
 
 {-
@@ -465,21 +458,6 @@ prop_stepYield_ex1 = once $
   step (Cons 1 (Perform 2))
   == Yield (Cons1 1 Hole) (Perform 2)
 
--- TODO get rid of this stuff
-stepGlobal :: [Def] -> Expr -> Expr
-stepGlobal defs (Global g) = case lookupDef g defs of
-  Nothing -> Error $ "depends on a missing def: " ++ g
-  Just (Error _) -> Error $ "depends on a failed def: " ++ g
-  Just e -> e
-stepGlobal _ _ = error "stepGlobal can only handle Global exprs"
-
-stepInDefs :: [Def] -> Expr -> Step Context Expr
-stepInDefs defs expr =
-  case split expr of
-     Split c (Global g) -> Next $ plug c $ stepGlobal defs (Global g)
-     _ -> step expr
-
-
 {-
 runMain takes:
   - list of defs
@@ -490,14 +468,12 @@ runMain :: Monad m => [Def] -> (Expr -> m Expr) -> m Expr
 runMain defs handler = runInDefs defs (App (Global "main") []) handler
 
 runInDefs :: Monad m => [Def] -> Expr -> (Expr -> m Expr) -> m Expr
-runInDefs defs expr handler = loop expr
-  where defs' = evalDefs defs
-        loop expr = case stepInDefs defs' expr of
-          Done -> return expr
-          Next e -> loop e
-          Yield c e -> do
-            e' <- handler e
-            loop $ plug c e'
+runInDefs defs expr handler = last `fmap` traceExprM h expr
+  where h (Global x) = return $ case lookupDef x defs of
+          Nothing -> Error $ "depends on a missing def: " ++ x
+          Just (Error _) -> Error $ "depends on a failed def: " ++ x
+          Just e -> e
+        h e = handler e
 
 testHandler :: Expr -> Writer String Expr
 testHandler (Perform (Lit (String s))) = do
