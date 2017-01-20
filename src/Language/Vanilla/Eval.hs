@@ -215,6 +215,12 @@ stepRoot (Quote _) = error "not a redex"
 -- do some IO (or other monad) action.
 type YieldHandler m = (Expr -> m Expr)
 
+{-
+
+TODO explicitly define a "trace" as a coroutine.
+
+-}
+
 traceExpr :: YieldHandler Identity -> Expr -> [Expr]
 traceExpr h e = runIdentity (traceExprM h e)
 
