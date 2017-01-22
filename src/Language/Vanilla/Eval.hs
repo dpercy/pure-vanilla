@@ -1,5 +1,10 @@
 {-# LANGUAGE TemplateHaskell, OverloadedLists, TypeFamilies, FlexibleContexts, EmptyCase, DeriveGeneric #-}
-module Language.Vanilla.Eval where
+module Language.Vanilla.Eval (
+  evalDefs,
+  runInDefs,
+  traceDefs,
+  test,
+  ) where
 
 import Test.QuickCheck
 import qualified Data.Map as Map
@@ -7,7 +12,6 @@ import Data.Map (Map)
 import qualified Data.Set as Set
 import Data.Set (Set)
 import GHC.Exts
-import Data.List (find)
 import Data.Maybe
 import Data.Functor.Identity
 import Control.Monad.Writer
@@ -254,17 +258,6 @@ prop_evalExprClosure = once $
       [3, Local (Var "y" 42)])
 
 
--- A definition is done when it is a Value or an Error.
--- Something like (App (Error _) (Lit Null)) is not done, because the error
--- still needs to propagate up to the top level.
-isDefDone :: Def -> Bool
-isDefDone (Def _ (Error _)) = True
-isDefDone (Def _ expr) = case split expr of
-  Value -> True
-  Crash _ -> False
-  Split _ _ -> False
-
-
 {-
 
 - find the first non-done def (by splitting each one), split it
@@ -281,44 +274,6 @@ If all the defs are done then there is no active def; returns Nothing.
 
 lookupDef :: String -> [Def] -> Maybe Expr
 lookupDef name defs = lookup name $ map (\(Def n e) -> (n, e)) defs
-
-updateDef :: String -> Expr -> [Def] -> [Def]
-updateDef name newExpr defs = map f defs
-  where f (Def n e) = if n == name
-                      then (Def n newExpr)
-                      else (Def n e)
-
-data WhichActiveDef = AllDone
-                    | OneActive Def
-                    | Cycle String
-                    deriving (Eq, Show)
-
-findActiveDef :: [Def] -> WhichActiveDef
-findActiveDef defs = case find (not . isDefDone) defs of
-  Nothing -> AllDone
-  Just def -> recur def []
-    where recur :: Def -> [String] -> WhichActiveDef
-          recur (Def name expr) blocked =
-            if name `elem` blocked
-            then Cycle name
-            else
-              case split expr of
-               Value -> error "unreachable - this def satisfied (not . isDefDone)"
-               -- A def that is about to crash is active and has no dependencies on other defs.
-               Crash _ -> OneActive (Def name expr)
-               -- If this def's active expr is a global, then it depends on another def.
-               -- Look up that def and check whether it's done.
-               -- If it is done, this def is the active one (the global is the redex).
-               -- If it's not done, continue the search at that def.
-               Split _ (Global g) -> case lookupDef g defs of
-                 Nothing -> OneActive (Def name expr) -- missing other def means global steps to error
-                 Just otherDefExpr ->
-                   let otherDef = (Def g otherDefExpr) in
-                   if isDefDone otherDef
-                   then OneActive (Def name expr)
-                   else recur otherDef (name:blocked)
-               -- If the redex in this def is not a global, this is the active def.
-               Split _ _ -> OneActive (Def name expr)
 
 -- A Trace is not quite a list of expressions:
 -- it's a list of expressions that sometimes has to stop and ask for the value of a Global.

@@ -1,5 +1,10 @@
 {-# LANGUAGE TemplateHaskell, OverloadedLists, OverloadedStrings #-}
-module Language.Vanilla.Printer where
+module Language.Vanilla.Printer (
+  showExpr,
+  showDefs,
+  showTrace,
+  test,
+  ) where
 
 import Prelude hiding (showList)
 

@@ -23,7 +23,7 @@ main = do
 traceMain :: String -> IO ()
 traceMain file = do
   contents <- readFile file
-  let prog = Language.Vanilla.Parser.pp contents :: [Def]
+  let prog = Language.Vanilla.Parser.parseProgram' contents :: [Def]
   let trace = traceDefs prog
   putStrLn . show . showTrace $ (Map.toList trace)
 
@@ -32,7 +32,7 @@ interactMain :: String -> IO ()
 interactMain file = do
   contents <- readFile file
   interact $ \input -> do
-    let prog = Language.Vanilla.Parser.pp contents :: [Def]
+    let prog = Language.Vanilla.Parser.parseProgram' contents :: [Def]
     let expr = App (Global "main") (Cons (Lit $ String input) (Lit Null))
     let handler = (const $ return $ Error "unhandled effect")
     result <- runInDefs prog expr handler

@@ -1,4 +1,4 @@
-module Language.Vanilla.Prims where
+module Language.Vanilla.Prims (prims) where
 
 import qualified Data.Map as Map
 import Data.Map (Map)

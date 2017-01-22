@@ -1,8 +1,8 @@
 {-# LANGUAGE TemplateHaskell, OverloadedLists, OverloadedStrings, FlexibleContexts, NamedFieldPuns, BangPatterns #-}
-module Language.Vanilla.Server where
+module Language.Vanilla.Server (main, test) where
 
 import Language.Vanilla.Core
-import Language.Vanilla.Eval
+import Language.Vanilla.Eval hiding (test)
 import Language.Vanilla.Parser (parseProgram, parseExpr)
 import Language.Vanilla.Printer (showExpr, showDefs)
 import Language.Vanilla.JS (trResidualProgram)

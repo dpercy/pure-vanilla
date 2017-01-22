@@ -1,5 +1,10 @@
 {-# LANGUAGE TemplateHaskell, OverloadedLists, FlexibleContexts #-}
-module Language.Vanilla.Parser where
+module Language.Vanilla.Parser (
+  parseProgram,
+  parseProgram',
+  parseExpr,
+  test,
+  ) where
 
 import Language.Vanilla.Core
 
@@ -290,10 +295,11 @@ app (Var "cons" (-1)) [x, y] = Cons x y
 app (Var "tag" (-1)) [x, y] = Tag x y
 app f a = App (Local f) (foldr Cons (Lit Null) a)
 
-pp :: String -> [Def]
-pp s = case parse (spaces >> program) "<in>" s of
+parseProgram' :: String -> [Def]
+parseProgram' s = case parse (spaces >> program) "<in>" s of
   Left err -> error $ show err
   Right v -> fixScope v
+pp = parseProgram'
 
 fixScope :: [Def] -> [Def]
 fixScope = map fixDef

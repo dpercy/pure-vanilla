@@ -1,5 +1,8 @@
 {-# LANGUAGE TemplateHaskell, OverloadedStrings #-}
-module Language.Vanilla.JS where
+module Language.Vanilla.JS (
+  trResidualProgram,
+  test,
+  ) where
 
 {--------------------------------------------------------------------------- }
 
