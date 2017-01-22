@@ -22,6 +22,8 @@ import Language.Vanilla.Prims
 
 
 -- subst does capture-avoiding substitution, and also renames every binding to avoid shadowing.
+-- NOTE: it doesn't rename any bindings in the range of the substitution though!
+-----    this can lead to shadowing!
 subst :: InScope -> Expr -> Map Var Expr -> Expr
 subst scope term sub =
   let recur term = subst scope term sub in
@@ -35,9 +37,10 @@ subst scope term sub =
     Func params body ->
       -- rename parameters so they don't shadow anything in scope
       let (scope', params') = renameVars scope params in
-       -- extend the env with parameter renamings
-       let newSubs = Map.union sub$ Map.fromList $ zip params (map Local params') in
-       let sub' = Map.union sub newSubs in
+       -- extend the env with parameter renamings.
+       -- this has the side benefit of removing the old parameter names from the subst,
+       --- which is what prevents subst (\x -> x) (Map x -> 1) from returning (\x -> 1).
+       let sub' = (Map.fromList $ zip params $ map Local params') `Map.union` sub in
        Func params' (subst scope' body sub')
     App e0 e1 -> App (recur e0) (recur e1)
     If e0 e1 e2 -> If (recur e0) (recur e1) (recur e2)
@@ -56,6 +59,11 @@ substTop term sub = subst scope term sub
           (_, e) <- Map.toList sub
           fv <- Set.toList $ freeVars e
           return fv
+
+prop_substShadow =
+  substTop (Func [Var "x" 0] (Local $ Var "x" 0)) (Map.fromList [(Var "x" 0, Lit $ Num 1)])
+  == (Func [Var "x" 0] (Local $ Var "x" 0))
+   
 
 freeVars :: Expr -> Set Var
 freeVars (Local v) = [v]
