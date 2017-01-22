@@ -1,8 +1,8 @@
 
-# TODO this should evaluate to [2, 0] but I get [3, 0]
-example = guardStep(isValid_part1)([2, 0], "R")
-
-main = (input) -> pretty(eval(initialState, isValid_part1, parse(input)))
+main = (input) -> show([
+  pretty(prettyState_part1, eval([1, 1], isValid_part1, parse(input))),
+  pretty(prettyState_part2, eval([0, 0], isValid_part2, parse(input))),
+])
 
 parse = (input) -> map(parseLine, splitlines(input))
 parseLine = (line) -> filter(nonempty, split(line, ""))
@@ -14,11 +14,20 @@ guardStep = (isValid) -> (state, letter) ->
   let newState = step(state, letter) in
   if isValid(newState) then newState
   else state
+
 isValid_part1 = (state) ->
   let x = first(state) in
   let y = first(rest(state)) in
   foldl(and, true, [ (-1) < x, x < 3,
                      (-1) < y, y < 3, ])
+
+isValid_part2 = (state) ->
+  # abs(x) + abs(y) <= 2
+  let x = first(state) in
+  let y = first(rest(state)) in
+  (abs(x) + abs(y)) < 3
+
+abs = (n) -> if n < 0 then (- n) else n
 
 step = (state, letter) ->
   let x = first(state) in
@@ -38,11 +47,33 @@ eval = (state, isValid, lines) ->
 
 evalLine = (state, isValid, line) -> foldl(guardStep(isValid), state, line)
 
-pretty = (states) -> foldl((a, b) -> strcat(a, b), "", map(prettyState, states))
-prettyState = (state) ->
+pretty = (prettyState, states) -> foldl((a, b) -> strcat(a, b), "", map(prettyState, states))
+
+prettyState_part1 = (state) ->
   let x = first(state) in
   let y = first(rest(state)) in
   show((y * 3) + x + 1)
+
+prettyState_part2 = (state) ->
+  if      state == [ 0, -2] then "1"
+
+  else if state == [-1, -1] then "2"
+  else if state == [ 0, -1] then "3"
+  else if state == [ 1, -1] then "4"
+
+  else if state == [-2,  0] then "5"
+  else if state == [-1,  0] then "6"
+  else if state == [ 0,  0] then "7"
+  else if state == [ 1,  0] then "8"
+  else if state == [ 2,  0] then "9"
+
+  else if state == [-1,  1] then "A"
+  else if state == [ 0,  1] then "B"
+  else if state == [ 1,  1] then "C"
+
+  else if state == [ 0,  2] then "D"
+
+  else error("bad state")
 
 
 # TODO stdlib
