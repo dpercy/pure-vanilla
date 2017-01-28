@@ -66,8 +66,8 @@ prop_union_full = once $
 
                                 
 
-mkServer :: IO Server
-mkServer = do
+mkServer :: Libs -> IO Server
+mkServer libs = do
   defsBox <- newIORef ([] :: [Def])
   return Server {
     addDefs = \defs -> update defsBox (`unionDefs` defs),
@@ -75,10 +75,10 @@ mkServer = do
     getDefs = readIORef defsBox,
     query = \e -> do
       defs <- readIORef defsBox
-      runInDefs defs e (const $ return $ Error "unhandled effect"),
+      runInDefs libs defs e (const $ return $ Error "unhandled effect"),
     getResidualDefs = do
       defs <- readIORef defsBox
-      let !defs' = evalDefs defs
+      let !defs' = evalDefs libs defs
       return defs'
     }
 
@@ -92,14 +92,15 @@ mkServer = do
 
 main :: IO ()
 main = do
-  server <- mkServer
+  let libs = emptyLibs
+  server <- mkServer libs
   scotty 3000 $ do
     get "/" $ do
       setHeader "Content-type" "text/html"
       file "static/index.html"
     post "/addDefs" $ do
       s <- body
-      case parseProgram (unpack s) of
+      case parseProgram libs (unpack s) of
        Left err -> do
          status status400
          text $ fromString $ "Parse error: " ++ show err
@@ -109,7 +110,7 @@ main = do
          text $ fromString $ show $ showDefs defs
     post "/setDefs" $ do
       s <- body
-      case parseProgram (unpack s) of
+      case parseProgram libs (unpack s) of
        Left err -> do
          status status400
          text $ fromString $ "Parse error: " ++ show err
@@ -119,7 +120,7 @@ main = do
          text $ fromString $ show $ showDefs defs
     post "/query" $ do
       s <- body
-      case parseExpr (unpack s) of
+      case parseExpr libs (unpack s) of
        Left err -> do
          status status400
          text $ fromString $ "Parse error: " ++ show err

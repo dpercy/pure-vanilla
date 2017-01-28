@@ -34,7 +34,7 @@ instance Fractional Atom where
 
 
 data Expr = Local Var
-          | Global String
+          | Global String String
           | Lit Atom
           | Perform Expr -- an arbitrary value can be an effect
           | Cons Expr Expr
@@ -166,4 +166,10 @@ instance {-# OVERLAPPABLE #-} Repr a => Repr [a] where
 instance Repr Expr where
   toExpr = id
   fromExpr = return
-    
+
+
+-- Libs maps module names to modules,
+-- where a module maps defined names to definitions.
+type Libs = Map String (Map String Expr)
+
+emptyLibs = Map.empty

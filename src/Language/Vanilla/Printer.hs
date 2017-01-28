@@ -55,13 +55,13 @@ showDefs :: [Def] -> Doc
 showDefs defs = vcat $ intersperse "" $ map showDef defs
 
 showDef :: Def -> Doc
-showDef (Def x e) = hang 2 $ showGlobal x <+> char '=' <+> showExpr e
+showDef (Def x e) = hang 2 $ showGlobal "" x <+> char '=' <+> showExpr e
 
 se :: Expr -> Doc
 se expr = wrap (showExpr expr)
   where wrap = case expr of
                 -- leaf expressions don't need parens
-                Global _ -> id
+                Global _ _ -> id
                 Local _ -> id
                 Lit _ -> id
                 -- constructor and effect calls don't need parens
@@ -78,7 +78,7 @@ se expr = wrap (showExpr expr)
 
 showExpr :: Expr -> Doc
 showExpr (Local v) = showVar v
-showExpr (Global x) = showGlobal x
+showExpr (Global m x) = showGlobal m x
 showExpr e@(Lit Null) = showList e
 showExpr e@(Cons _ _) = showList e
 showExpr (Lit (Bool b)) = if b then "true" else "false"
@@ -101,9 +101,9 @@ showExpr (App (Func xs body) es) = sep [ "let"
         showBind x e = showVar x <+> "=" <+> se e
 showExpr (App f a) = case f of
   -- TODO do this more generally
-  Global "+" -> showInfix "+" a
-  Global "-" -> showInfix "-" a
-  Global "<" -> showInfix "<" a
+  Global _ "+" -> showInfix f a
+  Global _ "-" -> showInfix f a
+  Global _ "<" -> showInfix f a
   _ -> se f <> showArgs a
         
 showExpr (If t c a) = sep [ "if" <+> se t
@@ -120,16 +120,17 @@ showList e = brackets $ align $ sep $ punctuate "," $ docs e
         docs rest = ["..." <> se rest]
 
 
-showInfix :: String -> Expr -> Doc
-showInfix op a = case parseExprList a of
+showInfix :: Expr -> Expr -> Doc
+showInfix (Global m op) a = case parseExprList a of
   Nothing -> text op <> showArgs a
-  Just []  -> showGlobal op <> showArgs a
+  Just []  -> showGlobal m op <> showArgs a
   Just [a0] -> text op <+> se a0
   Just (a0:aa) -> sep docs
     where docs = a0':aa'
           a0' = se a0
           aa' = zipWith (<+>) (repeat $ text op) (map se aa)
   Just _ -> error "unreachable - why doesn't GHC see this?"
+showInfix e _ = error ("showInfix on a non-Global: " ++ show e)
 
 
 -- TODO use flatAlt to have a different representation when one line vs multiline
@@ -144,9 +145,10 @@ isId :: String -> Bool
 isId = and . map isIdChar
   where isIdChar c = isLetter c || isDigit c || c == '_'
 
-showGlobal :: String -> Doc
-showGlobal x = if isId x then text x
-               else char '(' <> text x <> char ')'
+showGlobal :: String -> String -> Doc
+showGlobal m x = text (prefix ++ suffix)
+  where suffix = if isId x then x else "(" ++ x ++ ")"
+        prefix = case m of "" -> "" ; _ -> m ++ "."
 
 showVar :: Var -> Doc
 showVar (Var x i) = if isId x then s

@@ -29,7 +29,7 @@ subst scope term sub =
   let recur term = subst scope term sub in
    case term of
     Local v -> Map.lookup v sub `fallback` term
-    Global _ -> term
+    Global _ _ -> term
     Lit _ -> term
     Perform e -> Perform (recur e)
     Cons e0 e1 -> Cons (recur e0) (recur e1)
@@ -68,7 +68,7 @@ prop_substShadow =
 freeVars :: Expr -> Set Var
 freeVars (Local v) = [v]
 freeVars (Func params body) = freeVars body `Set.difference` (fromList params)
-freeVars (Global _) = []
+freeVars (Global _ _) = []
 freeVars (Lit _) = []
 freeVars (Error _) = []
 freeVars (Quote _) = []
@@ -105,9 +105,9 @@ data Split = Value
            deriving (Eq, Show)
 split :: Expr -> Split
 split (Local _) = error "unreachable - split doesn't reach under binders"
-split (Global x) = case Map.lookup x prims of
-                    Just _ -> Value
-                    Nothing -> Split Hole (Global x)
+split (Global m x) = if m == "Base" && Map.member x prims
+                     then Value
+                     else Split Hole (Global m x)
 split (Lit _) = Value
 split (Perform eff) = case split eff of
   Value -> Split Hole (Perform eff)
@@ -186,15 +186,15 @@ step expr = case split expr of
   Value -> Done
   Crash msg -> Next (Error msg)
   Split c (Perform e) -> Yield c (Perform e)
-  Split c (Global x) -> Yield c (Global x)
+  Split c (Global m x) -> Yield c (Global m x)
   Split c e -> Next (plug c (stepRoot e))
 
 -- stepRoot assumes there is a redex at the root of the expr tree.
 stepRoot :: Expr -> Expr
 stepRoot (Local _) = error "stepRoot assumes locals have already been substituted"
-stepRoot (Global _) = error "stepRoot doesn't handle globals"
+stepRoot (Global _ _) = error "stepRoot doesn't handle globals"
 stepRoot (Perform _) = error "stepRoot can't handle Perform"
-stepRoot (App (Global op) args) = case Map.lookup op prims of
+stepRoot (App (Global "Base" op) args) = case Map.lookup op prims of
   Nothing -> error "unreachable - if app/global is a redex, global must be a value - a prim."
   Just f -> case parseExprList args of
              Nothing -> Error "args must be a list"
@@ -247,7 +247,7 @@ traceExprM h e = do rest <- computeRest
 
 evalExpr :: Expr -> Expr
 evalExpr e = last (traceExpr h e)
-  where h (Global _) = return $ Error "unbound global"
+  where h (Global _ _) = return $ Error "unbound global"
         h (Perform _) = return $ Error "unhandled effect"
         h _ = error "yielded a non-global, non-perform expression"
 
@@ -285,18 +285,23 @@ lookupDef name defs = lookup name $ map (\(Def n e) -> (n, e)) defs
 
 -- A Trace is not quite a list of expressions:
 -- it's a list of expressions that sometimes has to stop and ask for the value of a Global.
-data Trace = Steps [Expr] | ReadGlobal [Expr] String (Expr -> Trace)
+data Trace = Steps [Expr] | ReadGlobal [Expr] String String (Expr -> Trace)
 instance Show Trace where
   show (Steps es) = "Steps " ++ show es
-  show (ReadGlobal es x _) = "ReadGlobal " ++ show es ++ " " ++ show x ++ " (\\v -> ...)"
+  show (ReadGlobal es m x _) = unwords [ "ReadGlobal"
+                                       , show es
+                                       , show m
+                                       , show x
+                                       , "(\\v -> ...)"
+                                       ]
 emptyTrace = Steps []
 consTrace e tr = case tr of
   Steps es -> Steps (e:es)
-  ReadGlobal es x k -> ReadGlobal (e:es) x k
-yieldTrace x k = ReadGlobal [] x k
+  ReadGlobal es m x k -> ReadGlobal (e:es) m x k
+yieldTrace m x k = ReadGlobal [] m x k
 blockedOn tr = case tr of
   Steps _ -> Nothing
-  ReadGlobal _ x _ -> Just x
+  ReadGlobal _ m x _ -> Just (m, x)
 appendTrace :: Foldable list => list Expr -> Trace -> Trace
 appendTrace es tr = foldr (consTrace) tr es
 
@@ -310,18 +315,34 @@ generateTracesForDefs defs = traces
                   Done -> emptyTrace
                   Next e' -> t e'
                   Yield c (Perform _) -> t (plug c (Error "unhandled effect at import time"))
-                  Yield c (Global x) -> yieldTrace x $ \v -> t (plug c v)
+                  Yield c (Global m x) -> yieldTrace m x $ \v -> t (plug c v)
                   Yield _ _ -> error "yielded a non-effect, non-global"
 
-traceDefs :: [Def] -> Map String [Expr]
-traceDefs defs = close (generateTracesForDefs defs)
+
+
+lookupGlobal :: String -> String -> Libs -> Either String Expr
+lookupGlobal m x libs = case Map.lookup m libs of
+  Nothing -> Left ("module not imported: " ++ m)
+  Just sc -> case Map.lookup x sc of
+    Nothing -> Left (m ++ " does not define " ++ x)
+    Just (Error _) -> Left ("definition failed: " ++ m ++ "." ++ x)
+    Just v -> Right v
+
+traceDefs :: Libs -> [Def] -> Map String [Expr]
+traceDefs libs defs = close (generateTracesForDefs defs)
   where close :: Map String Trace -> Map String [Expr]
         -- The idea with close is to step all the defs, until some defs block.
         -- Then every def is either done, runnable, or deadlocked.
         -- Resume the runnable ones, kill the deadlocked ones, and continue.
         close defs =
+          -- blocked maps every def name that yielded to the global it asks for
           let blocked = Map.mapMaybe blockedOn defs in
-          let deadlocked = findCycles (Map.toList blocked)
+          -- blockedLocally is only concerned with defs that are blocked in this module.
+          let blockedLocally = Map.mapMaybe f blocked
+                where f ("", x) = Just x
+                      f _ = Nothing
+          in
+          let deadlocked = findCycles (Map.toList blockedLocally)
                 where findCycles :: [(String, String)] -> [String]
                       findCycles m = concat $ filter nontrivial $ map flattenSCC (stronglyConnComp (map (\(k, v) -> (k, k, [v])) m))
                         where nontrivial xs = length xs > 1
@@ -331,39 +352,47 @@ traceDefs defs = close (generateTracesForDefs defs)
           else let
             resume :: Trace -> Trace
             resume tr@(Steps _) = tr
-            resume tr@(ReadGlobal es x k) =
+            resume tr@(ReadGlobal es "" x k) =
               if x `elem` deadlocked
               then appendTrace es (k (Error "cyclic definitions"))
               else
                 case fromJust (Map.lookup x defs) of
                  -- if x is not done yet, the ReadGlobal blocks
-                 ReadGlobal _ _ _ -> tr
+                 ReadGlobal _ _ _ _ -> tr
                  -- if x is done, plug in the value (or an error, if x failed)
                  Steps vs -> case last vs of
                    Error _ -> appendTrace es (k (Error ("depends on a failed def: " ++ x)))
                    e -> appendTrace es (k e)
+            resume (ReadGlobal es m x k) = case lookupGlobal m x libs of
+              Left msg -> appendTrace es (k (Error msg))
+              Right v -> appendTrace es (k v)
             in close (Map.map resume defs)
 
 
 
 -- Be warned: evalDefs is undefined if any def fails to terminate.
-evalDefs :: [Def] -> [Def]
-evalDefs defs = map (\(Def x _) -> (Def x (fromJust (Map.lookup x traces)))) defs
-  where traces = Map.map last (traceDefs defs)
+evalDefs :: Libs -> [Def] -> [Def]
+evalDefs libs defs = map (\(Def x _) -> (Def x (fromJust (Map.lookup x traces)))) defs
+  where traces = Map.map last (traceDefs libs defs)
+
+evalDefs' :: [Def] -> [Def]
+evalDefs' = evalDefs emptyLibs
 
 
-prop_evalEmpty = once $ traceDefs [] == Map.fromList []
+prop_evalEmpty = once $ traceDefs emptyLibs [] == Map.fromList []
 prop_evalEasy = once $
-  traceDefs [ Def "x" (App (Global "z") [42])
-            , Def "y" (Global "x")
-            , Def "z" (If (Lit $ Bool True) (Func [Var "a" 0] [Local (Var "a" 0)]) 456)
-            ]
+  traceDefs emptyLibs [ Def "x" (App (Global "" "z") [42])
+                         , Def "y" (Global "" "x")
+                         , Def "z" (If (Lit $ Bool True)
+                                    (Func [Var "a" 0] [Local (Var "a" 0)])
+                                    456)
+                         ]
   == Map.fromList [
-    ("x", [ (App (Global "z") [42])
+    ("x", [ (App (Global "" "z") [42])
           , (App (Func [Var "a" 0] [Local (Var "a" 0)]) [42])
           , [42]
           ]),
-    ("y", [ (Global "x")
+    ("y", [ (Global "" "x")
           , [42]
           ]),
     ("z", [ (If (Lit $ Bool True) (Func [Var "a" 0] [Local (Var "a" 0)]) 456)
@@ -373,16 +402,16 @@ prop_evalEasy = once $
 
 
 prop_evalCycle = once $
-  traceDefs [ Def "x" (App (Global "y") [42])
-            , Def "y" (If (Lit $ Bool True) (Global "x") 456)
-            ]
+  traceDefs emptyLibs [ Def "x" (App (Global "" "y") [42])
+                         , Def "y" (If (Lit $ Bool True) (Global "" "x") 456)
+                         ]
   == Map.fromList [
-    ("x", [ (App (Global "y") [42])
+    ("x", [ (App (Global "" "y") [42])
           , (App (Error "cyclic definitions") [42])
           , (Error "cyclic definitions")
           ]),
-    ("y", [ (If (Lit $ Bool True) (Global "x") 456)
-          , (Global "x")
+    ("y", [ (If (Lit $ Bool True) (Global "" "x") 456)
+          , (Global "" "x")
           , (Error "cyclic definitions")
           ])
     ]
@@ -393,31 +422,31 @@ prop_evalCycle = once $
 -- This is especially important when this global-under-same-local case
 -- only occurs after the program steps (as opposed to being present in the source).
 prop_evalShadowGlobal = once $
-  evalDefs [ Def "x" (Lit $ Num 7)
-           , Def "y" (App
-                      (Func [Var "v" 0] (Func [Var "x" 0] (Local (Var "v" 0))))
-                      [(Func [] (Global "x"))])
+  evalDefs' [ Def "x" (Lit $ Num 7)
+            , Def "y" (App
+                       (Func [Var "v" 0] (Func [Var "x" 0] (Local (Var "v" 0))))
+                       [(Func [] (Global "" "x"))])
            ]
   == [ Def "x" (Lit $ Num 7)
        -- Note the capitalized Func constructor:
-       -- this Global "x" doesn't refer to the parameter "x".
-     , Def "y" (Func [Var "x" 0] (Func [] (Global "x")))
+       -- this Global "" "x" doesn't refer to the parameter "x".
+     , Def "y" (Func [Var "x" 0] (Func [] (Global "" "x")))
      ]
 
 prop_evalPrim = once $
-  evalDefs [ Def "x" (App (Global "+") [3, 4]) ]
+  evalDefs' [ Def "x" (App (Global "Base" "+") [3, 4]) ]
   == [ Def "x" 7 ]
 
-prop_evenOdd = once $ lookupDef "result" (evalDefs
+prop_evenOdd = once $ lookupDef "result" (evalDefs'
   [ Def "isEven" (Func [Var "n" 0]
-                  (If (App (Global "<") [Local (Var "n" 0), 1])
+                  (If (App (Global "Base" "<") [Local (Var "n" 0), 1])
                    (Lit $ Bool True)
-                   (App (Global "isOdd") [(App (Global "+") [-1, Local (Var "n" 0)])])))
+                   (App (Global "" "isOdd") [(App (Global "Base" "+") [-1, Local (Var "n" 0)])])))
   , Def "isOdd" (Func [Var "n" 0]
-                 (If (App (Global "<") [Local (Var "n" 0), 1])
+                 (If (App (Global "Base" "<") [Local (Var "n" 0), 1])
                   (Lit $ Bool False)
-                  (App (Global "isEven") [(App (Global "+") [-1, Local (Var "n" 0)])])))
-  , Def "result" (App (Global "isEven") [5])
+                  (App (Global "" "isEven") [(App (Global "Base" "+") [-1, Local (Var "n" 0)])])))
+  , Def "result" (App (Global "" "isEven") [5])
   ])
   == Just (Lit $ Bool False)
 
@@ -427,21 +456,16 @@ prop_stepYield_ex1 = once $
   step (Cons 1 (Perform 2))
   == Yield (Cons1 1 Hole) (Perform 2)
 
-{-
-runMain takes:
-  - list of defs
-  - an effect handler (something that consumes a Yield, does an effect, and returns a new expr)
-And runs the computation, using the effect handler to handle any Yields that happen.
--}
-runMain :: Monad m => [Def] -> (Expr -> m Expr) -> m Expr
-runMain defs handler = runInDefs defs (App (Global "main") []) handler
 
-runInDefs :: Monad m => [Def] -> Expr -> (Expr -> m Expr) -> m Expr
-runInDefs defs expr handler = last `fmap` traceExprM h expr
-  where h (Global x) = return $ case lookupDef x defs of
-          Nothing -> Error $ "depends on a missing def: " ++ x
-          Just (Error _) -> Error $ "depends on a failed def: " ++ x
-          Just e -> e
+
+runInDefs :: Monad m => Libs -> [Def] -> Expr -> (Expr -> m Expr) -> m Expr
+runInDefs libs defs expr handler = last `fmap` traceExprM h expr
+  where globals = Map.insert "" defs' libs
+          where defs' = Map.fromList (map (\(Def x e) -> (x, e)) defs)
+        h (Global m x) = return $ case lookupGlobal m x globals of
+          -- TODO add a parameter for the libraries
+          Left msg -> Error msg
+          Right v -> v
         h e = handler e
 
 testHandler :: Expr -> Writer String Expr
@@ -451,7 +475,10 @@ testHandler (Perform (Lit (String s))) = do
 testHandler _ = return $ Error "testHandler can't handle this effect"
 
 prop_runMain_ex1 = once $
-  runWriter (runMain [ Def "main" (Func [] (Perform (Lit $ String "hi"))) ] testHandler)
+  runWriter (runInDefs emptyLibs
+             [ Def "main" (Func [] (Perform (Lit $ String "hi"))) ]
+             (App (Global "" "main") [])
+             testHandler)
   == ((Lit $ String "ok"), "hi")
 
 -- scary quickCheck macros!

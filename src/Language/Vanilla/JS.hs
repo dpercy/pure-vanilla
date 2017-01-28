@@ -44,7 +44,7 @@ trDef (Def x e) = "var " ++ x ++ " = " ++ trExpr e ++ ";\n"
 
 trExpr :: Expr -> String
 trExpr (Local v) = nameVar v
-trExpr (Global s) = s -- TODO avoid collision with Local
+trExpr (Global m s) = m ++ "_" ++ s -- TODO avoid collision with Local
 trExpr (Lit v) = trAtom v
 trExpr e@(Perform _) = noCase e
 trExpr e@(Cons _ _) = noCase e
@@ -59,21 +59,21 @@ trExpr e@(App f a) = case parseExprList a of
   Nothing -> noCase e
   Just a' -> case (f, a') of
     -- any-arity operator
-    (Global op, args) | op `elem` ["+", "*"] ->
-                        let args' = map trExpr args in
-                        "(" ++ (concat $ intersperse (" " ++ op ++ " ") args') ++ ")"
+    (Global "Base" op, args) | op `elem` ["+", "*"] ->
+                               let args' = map trExpr args in
+                               "(" ++ (concat $ intersperse (" " ++ op ++ " ") args') ++ ")"
     -- binary operators
-    (Global op, [x, y]) | op `elem` ["-", "<"] ->
-                          concat [ "("
-                                 , trExpr x
-                                 , " "
-                                 , op
-                                 , " "
-                                 , trExpr y
-                                 , ")"
-                                 ]
+    (Global "Base" op, [x, y]) | op `elem` ["-", "<"] ->
+                                 concat [ "("
+                                        , trExpr x
+                                        , " "
+                                        , op
+                                        , " "
+                                        , trExpr y
+                                        , ")"
+                                        ]
     -- unary operators
-    (Global "-", [x]) -> "(- " ++ trExpr x ++ ")"
+    (Global "Base" "-", [x]) -> "(- " ++ trExpr x ++ ")"
     -- general case for function application
     _ -> trExpr f ++ "(" ++ commas (map trExpr a') ++ ")"
 trExpr (If t c a) = concat [ "("
@@ -105,7 +105,7 @@ trAtom (String s) = show s
 
 
 prop_example = once $
-  trResidualProgram [Def "f" (Func [Var "x" 0] (App (Global "+") (Cons (Local (Var "x" 0)) (Cons 3 (Lit Null)))))]
+  trResidualProgram [Def "f" (Func [Var "x" 0] (App (Global "Base" "+") (Cons (Local (Var "x" 0)) (Cons 3 (Lit Null)))))]
   == unlines [ "(function() {"
              , "var f = function(_x_0) { return (_x_0 + 3.0); };"
              , "return {"

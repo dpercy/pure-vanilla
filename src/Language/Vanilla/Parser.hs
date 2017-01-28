@@ -1,5 +1,6 @@
 {-# LANGUAGE TemplateHaskell, OverloadedLists, FlexibleContexts #-}
 module Language.Vanilla.Parser (
+  parsePrelude,
   parseProgram,
   parseProgram',
   parseExpr,
@@ -7,6 +8,8 @@ module Language.Vanilla.Parser (
   ) where
 
 import Language.Vanilla.Core
+import Language.Vanilla.Prims (prims)
+import Language.Vanilla.Eval (evalDefs)
 
 import Test.QuickCheck
 import Text.Parsec hiding (token, space, spaces, newline, Error)
@@ -17,6 +20,7 @@ import Data.Ratio
 import Data.Maybe
 import qualified Data.Map as Map
 import GHC.Exts (fromList)
+import System.IO (withFile, IOMode(ReadMode), hGetContents)
 
 {-
 
@@ -213,7 +217,6 @@ parseList = emptyCase <|> splatCase <|> itemCase
                                 rest <- parseList
                                 return (Cons e rest)
 factor = do head <- leaf
-            -- TODO test curried calls like f(1)(2)
             calls head
               where calls head = (call head >>= calls) <|> return head
 arith :: Parser Expr
@@ -295,41 +298,78 @@ app (Var "cons" (-1)) [x, y] = Cons x y
 app (Var "tag" (-1)) [x, y] = Tag x y
 app f a = App (Local f) (foldr Cons (Lit Null) a)
 
-parseProgram' :: String -> [Def]
-parseProgram' s = case parse (spaces >> program) "<in>" s of
+parseProgram' :: Libs -> String -> [Def]
+parseProgram' libs s = case parse (spaces >> program) "<in>" s of
   Left err -> error $ show err
-  Right v -> fixScope v
-pp = parseProgram'
+  Right v -> fixScope libs v
+pp = parseProgram' emptyLibs
 
-fixScope :: [Def] -> [Def]
-fixScope = map fixDef
-  where fixDef (Def x e) = Def x (fixExprScope emptyScope e)
+-- fixScope resolves variable references.
+--  - local variables become (Local (Var x n))
+--  - global variables become (Global m x)
+fixScope :: Libs -> [Def] -> [Def]
+fixScope libs defs = map fixDef defs
+  where fixDef (Def x e) = Def x (fixExprScope globals emptyScope e)
+        globals = Map.insert "" (Map.fromList (map (\(Def x e) -> (x, e)) defs)) libs
 
-fixExprScope scope@(InScope sc) e =
-  let r = fixExprScope (InScope sc) in
+fixExprScope :: Libs -> InScope -> Expr -> Expr
+fixExprScope globals scope@(InScope sc) e =
+  let r = fixExprScope globals (InScope sc) in
    case e of
     Local (Var x (-1)) -> case Map.lookup x sc of
-      Nothing -> Global x
       Just i -> Local (Var x i)
+      Nothing -> resolveGlobal x globals
     Local (Var x i) -> Local (Var x i)
     Func p b -> let (scope', p') = renameVars scope p in
-                 Func p' (fixExprScope scope' b)
-    Global _ -> error "fixScope assumes all ids are Local"
+                 Func p' (fixExprScope globals scope' b)
+    Global _ _ -> error "fixScope assumes all ids are Local (TODO add literal notation for globals)"
     Lit _ -> e
     Error _ -> e
     -- TODO enforce here my assumption that quoted syntax does not contain free variables.
     --- but remember that once you take-apart a syntax, it can become open...
-    Quote stx -> Quote (fixExprScope emptyScope stx)
+    Quote stx -> Quote (fixExprScope globals emptyScope stx)
     Perform e0 -> Perform (r e0)
     Cons e0 e1 -> Cons (r e0) (r e1)
     Tag e0 e1 -> Tag (r e0) (r e1)
     App e0 e1 -> App (r e0) (r e1)
     If e0 e1 e2 -> If (r e0) (r e1) (r e2)
 
-parseProgram s = fixScope `fmap` parse (spaces >> program) "<in>" s
+resolveGlobal :: String -> Libs -> Expr
+-- zero matches: pretend it was (Global "" _)???
+-- one match: resolve it
+-- multiple matches: parse error...???
+resolveGlobal x libs = case resolvePrim x ++ resolveInLibs x of
+                        [] -> (Global "" x)
+                        [m] -> (Global m x)
+                        mods -> Error ("ambiguous variable " ++ x ++ " could be " ++ show mods)
+  where resolvePrim :: String -> [String]
+        resolvePrim x = case Map.lookup x prims of
+          Nothing -> []
+          Just _ -> ["Base"]
+        resolveInLibs :: String -> [String]
+        resolveInLibs x = do
+          (libName, defs) <- Map.toList libs
+          if x `elem` (Map.keys defs)
+            then [libName]
+            else []
 
-parseExpr s = fixExprScope emptyScope `fmap` parse (spaces >> expr) "<in>" s
+parseProgram :: Libs -> String -> Either ParseError [Def]
+parseProgram libs s = fixScope libs `fmap` parse (spaces >> program) "<in>" s
 
+parseExpr :: Libs -> String -> Either ParseError Expr
+parseExpr libs s = fixExprScope libs emptyScope `fmap` parse (spaces >> expr) "<in>" s
+
+parsePrelude :: String -> IO Libs
+parsePrelude file = do
+  withFile file ReadMode $ \fh -> do
+    contents <- hGetContents fh
+    case parseProgram emptyLibs contents of
+     Left err -> error (show err)
+     Right program ->
+       let program' = evalDefs emptyLibs program in
+       let program'' = map (\(Def x e) -> (x, e)) program' in
+       let program''' = Map.fromList program'' in
+       return $ Map.fromList [("Prelude", program''')]
 
 prop_empty = once $
   pp "" == []
@@ -360,7 +400,7 @@ prop_only_newlines = once $
 
 prop_func = once $
   pp "v = (x) -> cons(x, y)"
-  == [ Def "v" (Func [Var "x" 0] (Cons (Local (Var "x" 0)) (Global "y"))) ]
+  == [ Def "v" (Func [Var "x" 0] (Cons (Local (Var "x" 0)) (Global "" "y"))) ]
 
 prop_params = once $
   pp "f = (x, y, ++) -> 1"
@@ -368,16 +408,16 @@ prop_params = once $
 
 prop_call = once $
   pp "v = f(x, 1)"
-  == [ Def "v" (App (Global "f") [(Global "x"), 1]) ]
+  == [ Def "v" (App (Global "" "f") [(Global "" "x"), 1]) ]
 
 prop_call_curry = once $
   pp "v = f(x, 1)()(y)"
-  == [ Def "v" (App (App (App (Global "f") [Global "x", 1]) []) [Global "y"]) ]
+  == [ Def "v" (App (App (App (Global "" "f") [Global "" "x", 1]) []) [Global "" "y"]) ]
 
 prop_prefix = once $
   pp "f = () -> (- x)"
   == [  Def "f" (Func []
-                 (App (Global "-") [Global "x"]))
+                 (App (Global "Base" "-") [Global "" "x"]))
      ]
 
 prop_ops = once $
@@ -390,7 +430,7 @@ prop_ops = once $
 
 prop_letin = once $
   pp "v = let x = 1 in (x + 2)"
-  == [ Def "v" (App (Func [Var "x" 0] (App (Global "+")
+  == [ Def "v" (App (Func [Var "x" 0] (App (Global "Base" "+")
                                        [Local (Var "x" 0), 2]))
                 [1]) ]
 
@@ -404,19 +444,19 @@ prop_conditionals = once $
 
 prop_prims = once $
   pp "v = 1 < 2"
-  == [ Def "v" (App (Global "<") [1, 2]) ]
+  == [ Def "v" (App (Global "Base" "<") [1, 2]) ]
 
 prop_if_has_lower_precedence_than_infix = once $
   pp "v = if 1 then 2 else 3 + 4"
-  == [ Def "v" (If 1 2 (App (Global "+") [3, 4])) ]
+  == [ Def "v" (If 1 2 (App (Global "Base" "+") [3, 4])) ]
 
 prop_if_has_lower_precedence_than_apply = once $
   pp "v = if 1 then 2 else f(3)"
-  == [ Def "v" (If 1 2 (App (Global "f") [3])) ]
+  == [ Def "v" (If 1 2 (App (Global "" "f") [3])) ]
 
 prop_if_has_lower_precedence_than_apply_then_infix = once $
   pp "v = if 1 then 2 else 3(4) + 5"
-  == [ Def "v" (If 1 2 (App (Global "+") [App 3 [4], 5])) ]
+  == [ Def "v" (If 1 2 (App (Global "Base" "+") [App 3 [4], 5])) ]
 
 prop_shadow = once $
   pp "f = (x) -> (x) -> x"
