@@ -19,6 +19,7 @@ import Data.Char
 import Data.Ratio
 import Data.Maybe
 import qualified Data.Map as Map
+import Data.Map (Map)
 import GHC.Exts (fromList)
 import System.IO (withFile, IOMode(ReadMode), hGetContents)
 
@@ -369,7 +370,26 @@ parsePrelude file = do
        let program' = evalDefs emptyLibs program in
        let program'' = map (\(Def x e) -> (x, e)) program' in
        let program''' = Map.fromList program'' in
-       return $ Map.fromList [("Prelude", program''')]
+       let program'''' = makeModule "Prelude" program''' in
+       return $ Map.fromList [("Prelude", program'''')]
+
+-- makeModule replaces all (Global "" _) with (Global myModuleName _)
+makeModule :: String -> Map String Expr -> Map String Expr
+makeModule m p = Map.map f p
+  where f :: Expr -> Expr
+        f e@(Local _) = e
+        f (Global m' x) = case m' of
+                           "" -> Global m x
+                           _ -> Global m' x
+        f e@(Lit _) = e
+        f e@(Error _) = e
+        f (Perform eff) = Perform (f eff)
+        f (Cons h t) = Cons (f h) (f t)
+        f (Tag t v) = Tag (f t) (f v)
+        f (Func ps b) = Func ps (f b)
+        f (App callee args) = App (f callee) (f args)
+        f (If t c a) = If (f t) (f c) (f a)
+        f (Quote q) = Quote (f q)
 
 prop_empty = once $
   pp "" == []

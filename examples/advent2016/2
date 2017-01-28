@@ -77,9 +77,6 @@ prettyState_part2 = (state) ->
 
 
 # TODO stdlib
-map = (f, lst) ->
-  if isEmpty(lst) then lst
-  else cons(f(first(lst)), map(f, rest(lst)))
 filter = (f, lst) ->
   if isEmpty(lst) then lst
   else if f(first(lst)) then cons(first(lst), filter(f, rest(lst)))

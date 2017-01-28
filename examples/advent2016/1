@@ -91,9 +91,6 @@ uniqAdjacent = (lst) ->
   # hack around lack of boolean literals...
 true = 1 == 1
 false = 1 == 0
-map = (f, lst) ->
-  if isEmpty(lst) then []
-  else [ f(first(lst)), ...map(f, rest(lst)) ]
 foldl = (f, init, lst) ->
   if isEmpty(lst) then init
   else foldl(f, f(init, first(lst)), rest(lst))

@@ -1,0 +1,3 @@
+map = (f, lst) ->
+  if isEmpty(lst) then []
+  else [ f(first(lst)), ...map(f, rest(lst)) ]

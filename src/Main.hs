@@ -5,15 +5,15 @@ import System.Environment
 import qualified Language.Vanilla.Server
 
 import qualified Language.Vanilla.Parser
-import Language.Vanilla.Core (Libs, emptyLibs, Def(..), Expr(..), Atom(..))
+import Language.Vanilla.Core (Libs, Def(..), Expr(..), Atom(..))
 import Language.Vanilla.Eval (runInDefs, traceDefs)
 import Language.Vanilla.Printer (showTrace)
 
 import qualified Data.Map as Map
 
 
-defaultLibs :: Libs
-defaultLibs = emptyLibs
+defaultLibs :: IO Libs
+defaultLibs = Language.Vanilla.Parser.parsePrelude "examples/Prelude"
 
 
 main :: IO ()
@@ -28,7 +28,7 @@ main = do
 
 traceMain :: String -> IO ()
 traceMain file = do
-  let libs = defaultLibs
+  libs <- defaultLibs
   contents <- readFile file
   let prog = Language.Vanilla.Parser.parseProgram' libs contents :: [Def]
   let trace = traceDefs libs prog
@@ -37,7 +37,7 @@ traceMain file = do
 
 interactMain :: String -> IO ()
 interactMain file = do
-  let libs = defaultLibs
+  libs <- defaultLibs
   contents <- readFile file
   interact $ \input -> do
     let prog = Language.Vanilla.Parser.parseProgram' libs contents :: [Def]
