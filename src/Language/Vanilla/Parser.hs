@@ -281,6 +281,7 @@ letExpr = do keyword "let"
                                     e <- expr
                                     return (v, e)
              let (vs, es) = unzip binds
+             optional tok_newline
              keyword "in" ; optional tok_newline
              b <- expr
              return $ (App (Func vs b) (fromList es))

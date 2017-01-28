@@ -35,12 +35,15 @@ foldl = (f, init, lst) ->
   if isEmpty(lst) then init
   else foldl(f, f(init, first(lst)), rest(lst))
 
+foldr = (f, init, lst) ->
+  if isEmpty(lst) then init
+  else f(first(lst), foldr(f, init, rest(lst)))
+
 filter = (f, lst) ->
   if isEmpty(lst) then lst
   else if f(first(lst)) then cons(first(lst),
                                   filter(f, rest(lst)))
   else filter(f, rest(lst))
-
 
 
 # number functions
@@ -50,3 +53,16 @@ abs = (n) ->
   then (- n)
   else n
 
+# TODO allow defining operators (>) = (x, y) -> (y < x)
+
+
+# sorting
+
+
+sort = insertionSort
+
+insertionSort = (lst) -> foldr(insertionSortInsert, [], lst)
+insertionSortInsert = (e, lst) ->
+  if isEmpty(lst) then [e]
+  else if e < first(lst) then cons(e, lst)
+  else cons(first(lst), insertionSortInsert(e, rest(lst)))

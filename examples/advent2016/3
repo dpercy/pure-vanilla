@@ -1,0 +1,14 @@
+main = (input) ->
+  let triangles = parse(input) in
+  show(length(filter(isTrianglePossible, triangles)))
+
+parse = (input) -> map(parseLine, splitlines(input))
+parseLine = (line) -> map(parseInt, splitwords(line))
+
+isTrianglePossible = (tri) ->
+  let tri = sort(tri) in
+  let a = first(tri) in
+  let b = first(rest(tri)) in
+  let c = first(rest(rest(tri))) in
+  # TODO define and use (>) operator
+  c < (a + b)

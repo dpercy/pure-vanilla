@@ -42,6 +42,7 @@ prims = Map.fromList [
                     Nothing -> Error "length: non-list, non-string"),
   ("split", binop $ \str delim -> splitOn delim str :: [String]),
   unop "splitlines" lines,
+  unop "splitwords" words,
   unop "concat" (\v -> concat (v :: [[Expr]])),
   ("strcat", binop $ \a b -> a ++ b :: String),
   ("slice", ternop $ \str lo hi -> drop lo (take hi str) :: String),
