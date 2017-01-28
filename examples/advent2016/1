@@ -15,11 +15,6 @@ main = (input) ->
 measure = (state) ->
   abs(first(state)) + abs(first(rest(state)))
 
-abs = (n) -> 
-  if n < 0
-  then (- n)
-  else n
-
 initialState = [0, 0, "N"]
 
 stateLoc = (s) -> [first(s), first(rest(s))]
@@ -86,22 +81,3 @@ uniqAdjacent = (lst) ->
   else if isEmpty(rest(lst)) then lst
   else if first(lst) == first(rest(lst)) then uniqAdjacent(cons(first(lst), rest(rest(lst))))
   else cons(first(lst), uniqAdjacent(rest(lst)))
-
-# TODO this really belongs in the stdlib
-  # hack around lack of boolean literals...
-true = 1 == 1
-false = 1 == 0
-foldl = (f, init, lst) ->
-  if isEmpty(lst) then init
-  else foldl(f, f(init, first(lst)), rest(lst))
-elem = (x, lst) ->
-  if isEmpty(lst) then false
-  else if x == first(lst) then true
-  else elem(x, rest(lst))
-cons = (hd, tl) -> [hd, ...tl]
-append = (a, b) ->
-  if isEmpty(a) then b
-  else cons(first(a), append(rest(a), b))
-replicate = (n, x) ->
-  if 0 < n then cons(x, replicate(n - 1, x))
-  else []

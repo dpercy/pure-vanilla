@@ -27,8 +27,6 @@ isValid_part2 = (state) ->
   let y = first(rest(state)) in
   (abs(x) + abs(y)) < 3
 
-abs = (n) -> if n < 0 then (- n) else n
-
 step = (state, letter) ->
   let x = first(state) in
   let y = first(rest(state)) in
@@ -74,20 +72,3 @@ prettyState_part2 = (state) ->
   else if state == [ 0,  2] then "D"
 
   else error("bad state")
-
-
-# TODO stdlib
-filter = (f, lst) ->
-  if isEmpty(lst) then lst
-  else if f(first(lst)) then cons(first(lst), filter(f, rest(lst)))
-  else filter(f, rest(lst))
-
-foldl = (f, init, lst) ->
-  if isEmpty(lst) then init
-  else foldl(f, f(init, first(lst)), rest(lst))
-
-cons = (head, tail) -> [head, ...tail]
-
-true = 0 == 0
-false = 0 < 0
-and = (a, b) -> if a then b else false
