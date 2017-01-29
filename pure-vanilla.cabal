@@ -2,7 +2,7 @@ name:                pure-vanilla
 version:             0.1.0.0
 synopsis:            Simple project template from stack
 homepage:            https://github.com/dpercy/pure-vanilla
-author:              David Pery
+author:              David Percy
 maintainer:          davetp425@gmail.com
 copyright:           2016 David Percy
 category:            Language
