@@ -4,6 +4,7 @@ import qualified Data.Map as Map
 import Data.Map (Map)
 
 import Data.List.Split (splitOn)
+import Data.Char (ord, chr)
 
 import Language.Vanilla.Core
 import Language.Vanilla.Printer (showExpr) -- for "show" Primop
@@ -46,6 +47,8 @@ prims = Map.fromList [
   unop "concat" (\v -> concat (v :: [[Expr]])),
   ("strcat", binop $ \a b -> a ++ b :: String),
   ("slice", ternop $ \str lo hi -> drop lo (take hi str) :: String),
+  unop "ord" ord,
+  unop "chr" chr,
   unop "parseInt" (\v -> read v :: Integer),
   ("==", binop $ \a b -> (a :: Expr) == (b :: Expr))
   ]

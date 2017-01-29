@@ -14,8 +14,7 @@ isTrianglePossible = (tri) ->
   let a = first(tri) in
   let b = first(rest(tri)) in
   let c = first(rest(rest(tri))) in
-  # TODO define and use (>) operator
-  c < (a + b)
+  (a + b) > c
 
 flip3 = (triangles) ->
   foldr(append, [], map(transpose, chunk(3, triangles)))

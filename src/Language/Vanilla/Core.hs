@@ -157,6 +157,13 @@ instance {-# OVERLAPPING #-} Repr [Char] where
   fromExpr (Lit (String s)) = return s
   fromExpr _ = Left "non-string"
 
+instance Repr Char where
+  toExpr c = Lit (String [c])
+  fromExpr (Lit (String [c])) = return c
+  fromExpr (Lit (String [])) = Left "empty string can't be a Char"
+  fromExpr (Lit (String _)) = Left "multi-character string can't be a Char"
+  fromExpr _ = Left "non-string can't be a Char"
+
 instance {-# OVERLAPPABLE #-} Repr a => Repr [a] where
   toExpr xs = fromList (map toExpr xs)
   fromExpr e = case parseExprList e of

@@ -20,7 +20,7 @@ main :: IO ()
 main = do
   args <- getArgs
   case args of
-   ["serve"] -> Language.Vanilla.Server.main
+   ["serve"] -> defaultLibs >>= Language.Vanilla.Server.serve
    ["interact", file] -> interactMain file
    ["trace", file] -> traceMain file
    _ -> error "bad usage: should be   serve | interact <file> | trace <file>"

@@ -21,8 +21,11 @@ elem = (x, lst) ->
   else elem(x, rest(lst))
 
 append = (a, b) ->
+# TODO replace with foldr(cons, b, a) ?
   if isEmpty(a) then b
   else cons(first(a), append(rest(a), b))
+
+reverse = (lst) -> foldl(flip(cons), [], lst)
 
 replicate = (n, x) ->
   if 0 < n then cons(x, replicate(n - 1, x))
@@ -31,15 +34,13 @@ replicate = (n, x) ->
 take = (n, lst) ->
   if isEmpty(lst) then []
   else if n == 0 then []
-  # TODO use >
-  else if 0 < n then cons(first(lst), take(n - 1, rest(lst)))
+  else if n > 0 then cons(first(lst), take(n - 1, rest(lst)))
   else error("take negative")
 
 drop = (n, lst) ->
   if isEmpty(lst) then []
   else if n == 0 then lst
-  # TODO use >
-  else if 0 < n then drop(n - 1, rest(lst))
+  else if n > 0 then drop(n - 1, rest(lst))
   else error("drop negative")
 
 chunk = (n, lst) ->
@@ -51,6 +52,18 @@ transpose = (lsts) ->
   else if all(compose(not, isEmpty), lsts) then cons(map(first, lsts),
                                                      transpose(map(rest, lsts)))
   else error("transpose ragged lists")
+
+takeWhile = (pred, lst) ->
+  if isEmpty(lst) then []
+  else if pred(first(lst))
+   then cons(first(lst), takeWhile(pred, rest(lst)))
+  else []
+
+dropWhile = (pred, lst) ->
+  if isEmpty(lst) then []
+  else if pred(first(lst))
+   then dropWhile(pred, rest(lst))
+  else lst
 
 
 # higher-order list functions
@@ -76,26 +89,52 @@ filter = (f, lst) ->
 
 # function functions
 
+
 compose = (f, g) -> (x) -> f(g(x))
+
+flip = (f) -> (x, y) -> f(y, x)
+
+id = (x) -> x
 
 
 # number functions
 
-abs = (n) -> 
+abs = (n) ->
   if n < 0
   then (- n)
   else n
 
-# TODO allow defining operators (>) = (x, y) -> (y < x)
+(>) = flip((<))
+
+# TODO parameter and argument splats, so compose can be generic
+# (<=) = compose(not, (>))
+# (>=) = compose(not, (<))
+(<=) = (x, y) -> not(x > y)
+(>=) = (x, y) -> not(x < y)
 
 
-# sorting
+# lists of numbers
 
+sort = (lst) -> sortBy(id, lst)
 
-sort = insertionSort
+sortBy = insertionSortBy
 
-insertionSort = (lst) -> foldr(insertionSortInsert, [], lst)
-insertionSortInsert = (e, lst) ->
+insertionSortBy = (key, lst) ->
+  foldr((e, lst) -> insertionSortInsert(key, e, lst), [], lst)
+
+insertionSortInsert = (key, e, lst) ->
   if isEmpty(lst) then [e]
-  else if e < first(lst) then cons(e, lst)
-  else cons(first(lst), insertionSortInsert(e, rest(lst)))
+  # careful with comparison, to make the sort stable.
+  else if key(e) <= key(first(lst)) then cons(e, lst)
+  else cons(first(lst), insertionSortInsert(key, e, rest(lst)))
+
+
+sumBy = (key, lst) ->
+  foldr((+), 0, map(key, lst))
+
+
+# strings
+
+splitchars = (str) ->
+  # first(split(_, "")) is always "", so drop it.
+  rest(split(str, ""))

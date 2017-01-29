@@ -1,5 +1,5 @@
 {-# LANGUAGE TemplateHaskell, OverloadedLists, OverloadedStrings, FlexibleContexts, NamedFieldPuns, BangPatterns #-}
-module Language.Vanilla.Server (main, test) where
+module Language.Vanilla.Server (serve, test) where
 
 import Language.Vanilla.Core
 import Language.Vanilla.Eval hiding (test)
@@ -90,9 +90,8 @@ mkServer libs = do
 
 
 
-main :: IO ()
-main = do
-  let libs = emptyLibs
+serve :: Libs -> IO ()
+serve libs = do
   server <- mkServer libs
   scotty 3000 $ do
     get "/" $ do

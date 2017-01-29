@@ -144,7 +144,7 @@ program = "program" & do
 
 def :: Parser Def
 def = "definition" & do
-  Var x i <- variable
+  Var x i <- variable <|> parens tok_op
   guard (i == -1)
   tok_equals
   optional tok_newline
@@ -296,7 +296,6 @@ ifExpr = do keyword "if" ; t <- expr   ; optional tok_newline
 
 app :: Var -> [Expr] -> Expr
 app (Var "perform" (-1)) [e] = Perform e
-app (Var "cons" (-1)) [x, y] = Cons x y
 app (Var "tag" (-1)) [x, y] = Tag x y
 app f a = App (Local f) (foldr Cons (Lit Null) a)
 
@@ -420,8 +419,8 @@ prop_only_newlines = once $
   == []
 
 prop_func = once $
-  pp "v = (x) -> cons(x, y)"
-  == [ Def "v" (Func [Var "x" 0] (Cons (Local (Var "x" 0)) (Global "" "y"))) ]
+  pp "v = (x) -> tag(x, y)"
+  == [ Def "v" (Func [Var "x" 0] (Tag (Local (Var "x" 0)) (Global "" "y"))) ]
 
 prop_params = once $
   pp "f = (x, y, ++) -> 1"
@@ -456,8 +455,8 @@ prop_letin = once $
                 [1]) ]
 
 prop_special_functions = once $
-  pp "f = perform(tag(1, cons(2, 3)))"
-  == [ Def "f" (Perform (Tag 1 (Cons 2 3))) ]
+  pp "f = perform(tag(1, 2))"
+  == [ Def "f" (Perform (Tag 1 2)) ]
 
 prop_conditionals = once $
   pp "v = if 1 then 2 else if 3 then 4 else 5"
