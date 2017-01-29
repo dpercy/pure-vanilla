@@ -1,6 +1,10 @@
 main = (input) ->
   let triangles = parse(input) in
-  show(length(filter(isTrianglePossible, triangles)))
+  show([
+    length(filter(isTrianglePossible, triangles)),
+    length(filter(isTrianglePossible, flip3(triangles))),
+  ])
+
 
 parse = (input) -> map(parseLine, splitlines(input))
 parseLine = (line) -> map(parseInt, splitwords(line))
@@ -12,3 +16,6 @@ isTrianglePossible = (tri) ->
   let c = first(rest(rest(tri))) in
   # TODO define and use (>) operator
   c < (a + b)
+
+flip3 = (triangles) ->
+  foldr(append, [], map(transpose, chunk(3, triangles)))
