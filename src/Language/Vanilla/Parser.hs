@@ -295,6 +295,7 @@ ifExpr = do keyword "if" ; t <- expr   ; optional tok_newline
             return $ If t c e
 
 app :: Var -> [Expr] -> Expr
+app (Var "error" (-1)) [(Lit (String msg))] = Error msg
 app (Var "perform" (-1)) [e] = Perform e
 app (Var "tag" (-1)) [x, y] = Tag x y
 app f a = App (Local f) (foldr Cons (Lit Null) a)
