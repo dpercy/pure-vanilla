@@ -5,4 +5,6 @@ x = 1
 
 y = 2
 
-f = (a, b) -> a(b)
+mkpair = (left, right) -> selector -> selector(left, right)
+
+p = mkpair(x, y)
