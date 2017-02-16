@@ -14,6 +14,7 @@
 
   (require "./parse.rkt")
   (require "./compile.rkt")
+  (require (only-in racket provide))
 
   (define (parse-and-compile-module source-name port)
     (define ast (parse-port/imports port (hash)))
