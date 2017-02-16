@@ -21,6 +21,7 @@
                               (char-complement #\newline)))  (lex input-port)]
    ; a newline plus any mixture of whitespace and newlines is a Newline token
    [(concatenation #\newline (repetition 0 +inf.0 whitespace))  (token-Newline)]
+   [#\; (token-Newline)]
 
    [#\= (token-Equals)]
 
@@ -64,7 +65,7 @@
 (struct Func (params body) #:transparent)
 (struct Call (func args) #:transparent)
 
-(define parse
+(define pre-parse
   (parser
    (tokens tokens empty-tokens)
    (start Program)
@@ -76,7 +77,7 @@
           (nonassoc OpenParen)
           )
    (grammar
-    (Program [(Statements) (fix-scope-program (Program $1))])
+    (Program [(Statements) (Program $1)])
     (Statements [() (list)]
                 [(Statement) (list $1)]
                 [(Statement Newline Statements) (cons $1 $3)])
@@ -112,21 +113,48 @@
           [(Expr) (list $1)] ; base case with no trailing comma
           [(Expr Comma Args) (cons $1 $3)]))))
 
-(define (fix-scope-program program)
+(define (parse/imports lex! imports)
+  (fix-scope-program (pre-parse lex!) (invert-hash-of-sets imports)))
+
+(define (invert-hash-of-sets h)
+  (for*/fold ([result (hash)]) ([{k s} (in-hash h)]
+                                [v (in-set s)])
+    (hash-set result v (set-add (hash-ref result v (set))
+                                k))))
+(module+ test
+  (check-equal? (invert-hash-of-sets (hash 'm0 (set 'x 'f)
+                                           'm1 (set 'x 'y)
+                                           'm2 (set)))
+                (hash 'x (set 'm0 'm1)
+                      'f (set 'm0)
+                      'y (set 'm1))))
+
+(define (unwrap-unary-set s)
+  (if (= 1 (set-count s))
+      (set->list s)
+      #false))
+
+; imports-rev : hash( unqual-id-name -> set( module-name ) )
+(define (fix-scope-program program imports-rev)
   (match program
     [(Program statements)
      ; local-env : name -> number, the max of in-scope locals
      (define local-env (hash))
+     (define imports-rev*
+       (for/fold ([imports-rev imports-rev]) ([stmt statements])
+         (match stmt
+           [(Def (Unresolved name) _) (hash-remove imports-rev name)]
+           [_ imports-rev])))
      (Program (for/list ([stmt statements])
-                (fix-scope-statement stmt local-env)))]))
-(define (fix-scope-statement stmt local-env)
+                (fix-scope-statement stmt imports-rev* local-env)))]))
+(define (fix-scope-statement stmt imports-rev local-env)
   (match stmt
     [(Def var expr) (Def
-                      (fix-scope-expr var local-env)
-                      (fix-scope-expr expr local-env))]
-    [expr (fix-scope-expr expr local-env)]))
-(define (fix-scope-expr expr local-env)
-  (define (recur expr) (fix-scope-expr expr local-env))
+                      (fix-scope-expr var imports-rev local-env)
+                      (fix-scope-expr expr imports-rev local-env))]
+    [expr (fix-scope-expr expr imports-rev local-env)]))
+(define (fix-scope-expr expr imports-rev local-env)
+  (define (recur expr) (fix-scope-expr expr imports-rev local-env))
   (match expr
     [(Local name number)  expr]
     [(Global mod name)  expr]
@@ -134,8 +162,20 @@
 
     [(Lit value)  expr]
     [(Unresolved name)  (match (hash-ref local-env name #f)
-                          [#false  (Global #f name)]
-                          [(? number? n)  (Local name n)])]
+                          [(? number? n)  (Local name n)]
+                          [#false
+
+                           (match (hash-ref imports-rev name #f)
+                             ; TODO should unbound unqual ID be an error?
+                             ; IDs should refer to definitions!
+                             [#false (Global #f name)]
+                             [(app unwrap-unary-set (list m)) (Global m name)]
+                             [choices (error 'fix-scope
+                                             "Ambiguous reference ~a: could refer to ~a"
+                                             name
+                                             (string-join (for/list ([m choices])
+                                                            (format "~s.~s" m name))
+                                                          " or "))])])]
 
     [(Func params body)
      (let ([local-env* (for/fold ([local-env local-env]) ([p params])
@@ -152,8 +192,8 @@
                               (set! num (+ num 1)))
                             (hash-set local-env name num)]))])
        (Func (for/list ([p params])
-               (fix-scope-expr p local-env*))
-             (fix-scope-expr body local-env*)))]
+               (fix-scope-expr p imports-rev local-env*))
+             (fix-scope-expr body imports-rev local-env*)))]
     [(Call func args)  (Call (recur func)
                              (map recur args))]))
 
@@ -174,10 +214,12 @@
        [(Call func args)  (apply set-union
                                  (map explicit-locals (cons func args)))]))))
 
-(define (parse-string str)
+(define (parse-string/imports str imports-rev)
   (let* ([port (open-input-string str)]
          [lex! (lambda () (lex port))])
-    (parse lex!)))
+    (parse/imports lex! imports-rev)))
+(define (parse-string str)
+  (parse-string/imports str (hash)))
 (module+ test
   (require rackunit)
 
@@ -228,6 +270,10 @@
                 (Program (list (Call (Func (list (Local 'x 0))
                                            (Local 'x 0))
                                      (list (Global #f 'x))))))
+  (check-equal? (parse-string "x = (x -> x)(x)")
+                (Program (list (Def (Global #f 'x) (Call (Func (list (Local 'x 0))
+                                                               (Local 'x 0))
+                                                         (list (Global #f 'x)))))))
 
   ; explicitly qualified identifiers
   (check-equal? (parse-string "m.x")
@@ -273,7 +319,33 @@
                                                  (Call (Local 'x 2)
                                                        (list (Local 'x 1)))))))))
 
-  ; TODO let parser accept a scope for global imports
+  ; imported globals
+  ; "import" is in the Java sense: it lets you refer to identifiers by their unqualified names.
+  ; This is also similar to Haskell import statements.
+  ; - unqualified ids resolve to imported ids
+  (check-equal? (parse-string/imports "x" (hash 'm (set 'x)))
+                (Program (list (Global 'm 'x))))
+  ; - conflicting imports-rev fails
+  (check-exn exn:fail?
+             (lambda () (parse-string/imports "x" (hash 'm0 (set 'x)
+                                                        'm1 (set 'x))))
+             "ambiguous")
+  ; - but conflicting imports-rev only fail if the conflicted id is used
+  (check-equal? (parse-string/imports "f(y)" (hash 'm0 (set 'x 'f)
+                                                   'm1 (set 'x 'y)))
+                ; m0 and m1 both export x, but this program doesn't use x.
+                ; this program can still use identifiers from m0 and m1.
+                (Program (list (Call (Global 'm0 'f)
+                                     (list (Global 'm1 'y))))))
+  ; - defs shadow imports-rev
+  (check-equal? (parse-string/imports "x = 1 ; y = f(x)" (hash 'm (set 'x 'f)))
+                (Program (list (Def (Global #f 'x) (Lit 1))
+                               (Def (Global #f 'y) (Call (Global 'm 'f)
+                                                         (list (Global #f 'x)))))))
+  ; - params shadow imports-rev
+  (check-equal? (parse-string/imports "x -> x" (hash 'm (set 'x)))
+                (Program (list (Func (list (Local 'x 0))
+                                     (Local 'x 0)))))
 
   ;;
   )
