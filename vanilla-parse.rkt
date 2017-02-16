@@ -101,10 +101,6 @@
                     [(Iden Comma) (list $1)] ; base case with trailing comma
                     [(Iden Comma NonemptyParams) (cons $1 $3)])
     (TwoOrMoreParams [(Iden Comma NonemptyParams) (cons $1 $3)])
-    (Params [() (list)] ; empty case
-            [(Iden) (list $1)]
-            [(Iden Comma NonemptyParams) (cons $1 $3)] ; two more more case
-            )
     (Args [() (list)] ; empty case, or base case with trailing comma
           [(Expr) (list $1)] ; base case with no trailing comma
           [(Expr Comma Args) (cons $1 $3)]))))
