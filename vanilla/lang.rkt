@@ -4,8 +4,8 @@
 #:read-syntax parse-and-compile-module
 #:language 'bindings
 
-(require "./vanilla-parse.rkt")
-(require "./vanilla-compile.rkt")
+(require "./parse.rkt")
+(require "./compile.rkt")
 
 
 (define (parse-and-compile-module port)
