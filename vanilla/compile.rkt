@@ -1,13 +1,15 @@
 #lang racket
 
+(provide compile)
+
 (require racket/syntax)
-(require "./parse.rkt")
+(require (submod "./parse.rkt" ast))
 
 
 
-(define (compile ast) ; -> syntax-object
+(define (compile ast) ; -> syntax-object or list of syntax-object
   (match ast
-    [(Program statements) #`(begin #,@(map compile statements))]
+    [(Program statements) (map compile statements)]
     [(Def var expr) #`(define #,(compile var) #,(compile expr))]
     ; all generated identifiers have a dot.
     ; nice side effect: no conflict with Racket ids (quote, lambda, etc).

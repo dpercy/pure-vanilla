@@ -85,7 +85,8 @@
           (nonassoc OpenParen)
           )
    (grammar
-    (Program [(Statements) (Program $1)])
+    (Program [(Statements) (Program $1)]
+             [(Newline Statements) (Program $2)])
     (Statements [() (list)]
                 [(Statement) (list $1)]
                 [(Statement Newline Statements) (cons $1 $3)])
@@ -233,6 +234,13 @@
     (parse/imports lex! imports)))
 (module+ test
   (require rackunit)
+
+  ; whitespace
+  (check-equal? (parse-string "1") (Program (list (Lit 1))))
+  (check-equal? (parse-string "1\n") (Program (list (Lit 1))))
+  (check-equal? (parse-string "1\n\n\n") (Program (list (Lit 1))))
+  (check-equal? (parse-string "\n1") (Program (list (Lit 1))))
+  (check-equal? (parse-string "\n\n\n1") (Program (list (Lit 1))))
 
   (check-equal? (parse-string "f(x, 1)")
                 (Program (list (Call (Global #f 'f) (list (Global #f 'x)
