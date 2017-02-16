@@ -4,6 +4,12 @@
 (require parser-tools/yacc)
 (require "./util.rkt")
 
+(provide (all-from-out 'ast)
+         parse-string
+         parse-string/imports
+         parse-port/imports
+         )
+
 
 (define-tokens tokens (UnqualIden Num IdenNum QualIden))
 (define-empty-tokens empty-tokens (EOF Equals Newline OpenParen CloseParen Arrow Comma))
@@ -26,7 +32,7 @@
    [#\= (token-Equals)]
 
    [nat  (token-Num (string->number lexeme))]
-   [(concatenation iden #\' nat) (match (string-split lexeme "'")
+   [(concatenation iden #\. nat) (match (string-split lexeme ".")
                                    [(list name num) (token-IdenNum (list (string->symbol name)
                                                                          (string->number num)))])]
    [(concatenation iden #\. iden)  (match (string-split lexeme ".")
@@ -48,22 +54,24 @@
                                  (curry equal? (token-EOF))))))
 
 
+(module ast racket
+  (provide (all-defined-out))
+  (struct Program (statements) #:transparent)
+  (struct Def (var expr) #:transparent)
 
-(struct Program (statements) #:transparent)
-(struct Def (var expr) #:transparent)
+  (struct Lit (value) #:transparent)
+  ; `number` is not a De-Bruijn index or up-reference:
+  ; it's an extension of the variable's name.
+  ; Two locals are equal iff their `name` and `number` are equal.
+  (struct Local (name number) #:transparent)
+  (struct Global (mod name) #:transparent)
+  ; An Unresolved expression doesn't properly belong in an Expr.
+  ; It should never be observable by the user program.
+  (struct Unresolved (name) #:transparent)
 
-(struct Lit (value) #:transparent)
-; `number` is not a De-Bruijn index or up-reference:
-; it's an extension of the variable's name.
-; Two locals are equal iff their `name` and `number` are equal.
-(struct Local (name number) #:transparent)
-(struct Global (mod name) #:transparent)
-; An Unresolved expression doesn't properly belong in an Expr.
-; It should never be observable by the user program.
-(struct Unresolved (name) #:transparent)
-
-(struct Func (params body) #:transparent)
-(struct Call (func args) #:transparent)
+  (struct Func (params body) #:transparent)
+  (struct Call (func args) #:transparent))
+(require 'ast)
 
 (define pre-parse
   (parser
@@ -214,12 +222,15 @@
        [(Call func args)  (apply set-union
                                  (map explicit-locals (cons func args)))]))))
 
-(define (parse-string/imports str imports-rev)
+(define (parse-string/imports str imports)
   (let* ([port (open-input-string str)]
          [lex! (lambda () (lex port))])
-    (parse/imports lex! imports-rev)))
+    (parse/imports lex! imports)))
 (define (parse-string str)
   (parse-string/imports str (hash)))
+(define (parse-port/imports port imports)
+  (let* ([lex! (lambda () (lex port))])
+    (parse/imports lex! imports)))
 (module+ test
   (require rackunit)
 
@@ -278,41 +289,41 @@
   ; explicitly qualified identifiers
   (check-equal? (parse-string "m.x")
                 (Program (list (Global 'm 'x))))
-  (check-equal? (parse-string "x'0")
-                ; x'0 is not in scope but we have to parse it faithfully
+  (check-equal? (parse-string "x.0")
+                ; x.0 is not in scope but we have to parse it faithfully
                 (Program (list (Local 'x 0))))
   (check-equal? (parse-string "x -> x(m.x)")
                 ; params don't shadow explicit globals
                 (Program (list (Func (list (Local 'x 0))
                                      (Call (Local 'x 0)
                                            (list (Global 'm 'x)))))))
-  (check-equal? (parse-string "x'0 -> x'1 -> x'0(x'1)")
+  (check-equal? (parse-string "x.0 -> x.1 -> x.0(x.1)")
                 ; explicit numbers let you access parameters with the same name
                 (Program (list (Func (list (Local 'x 0))
                                      (Func (list (Local 'x 1))
                                            (Call (Local 'x 0)
                                                  (list (Local 'x 1))))))))
-  (check-equal? (parse-string "x'0 -> x -> x'0(x)")
+  (check-equal? (parse-string "x.0 -> x -> x.0(x)")
                 (Program (list (Func (list (Local 'x 0))
                                      (Func (list (Local 'x 1))
                                            (Call (Local 'x 0)
                                                  (list (Local 'x 1))))))))
-  (check-equal? (parse-string "x -> x'1 -> x(x'1)")
+  (check-equal? (parse-string "x -> x.1 -> x(x.1)")
                 (Program (list (Func (list (Local 'x 0))
                                      (Func (list (Local 'x 1))
                                            (Call (Local 'x 0)
                                                  (list (Local 'x 1))))))))
-  (check-equal? (parse-string "x -> x'0 -> x(x'0)")
-                ; This case has to turn the x into x'1, because otherwise
-                ; it would be shadowed by x'0.
+  (check-equal? (parse-string "x -> x.0 -> x(x.0)")
+                ; This case has to turn the x into x.1, because otherwise
+                ; it would be shadowed by x.0.
                 (Program (list (Func (list (Local 'x 1))
                                      (Func (list (Local 'x 0))
                                            (Call (Local 'x 1)
                                                  (list (Local 'x 0))))))))
-  (check-equal? (parse-string "x -> x -> x'1 -> x(x'1)")
-                ; The first x becomes x'0
-                ; Next can't be x'1, so it's x'2
-                ; Then the x in the body resolves to x'2
+  (check-equal? (parse-string "x -> x -> x.1 -> x(x.1)")
+                ; The first x becomes x.0
+                ; Next can't be x.1, so it's x.2
+                ; Then the x in the body resolves to x.2
                 (Program (list (Func (list (Local 'x 0))
                                      (Func (list (Local 'x 2))
                                            (Func (list (Local 'x 1))
