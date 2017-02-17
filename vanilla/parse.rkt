@@ -145,6 +145,9 @@
 
           ; infix
           [(Expr Op Expr) (Call $2 (list $1 $3))]
+          ; prefix
+          [(Op Expr) (Call $1 (list $2))]
+
           )
     (Args [() (list)] ; empty case, or base case with trailing comma
           [(Expr) (list $1)] ; base case with no trailing comma
@@ -441,6 +444,13 @@
                 (Program (list (Call (Global #f '+)
                                      (list (Global #f 'x)
                                            (Call (Global #f 'y) '()))))))
+
+  ; - prefix
+  (check-equal? (parse-string "- x")
+                (Program (list (Call (Global #f '-) (list (Global #f 'x))))))
+  ; - prefix nonassoc with infix
+  (check-exn exn:fail?
+             (lambda () (parse-string "- x + y")))
 
 
   ;;
