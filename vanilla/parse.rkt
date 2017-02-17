@@ -11,13 +11,18 @@
          )
 
 
-(define-tokens tokens (UnqualIden Num IdenNum QualIden))
+(define-tokens tokens (Num Iden Op))
 (define-empty-tokens empty-tokens (EOF Equals Newline OpenParen CloseParen Arrow Comma))
 
+(define-lex-abbrev digit (char-range #\0 #\9))
+(define-lex-abbrev letter (union (char-range #\a #\z)
+                                 (char-range #\A #\Z)))
 
-(define-lex-abbrev iden (concatenation alphabetic
-                                       (repetition 0 +inf.0 (union alphabetic numeric))))
-(define-lex-abbrev nat (repetition 1 +inf.0 (char-range #\0 #\9)))
+(define-lex-abbrev iden (concatenation letter
+                                       (repetition 0 +inf.0 (union letter digit))))
+(define-lex-abbrev op (repetition 1 +inf.0 (char-set "~!@$%^&*-+=:<>/?|\\")))
+
+(define-lex-abbrev nat (repetition 1 +inf.0 digit))
 (define lex
   (lexer
    ; TODO implement comments as an actual token?
@@ -27,23 +32,39 @@
                               (char-complement #\newline)))  (lex input-port)]
    ; a newline plus any mixture of whitespace and newlines is a Newline token
    [(concatenation #\newline (repetition 0 +inf.0 whitespace))  (token-Newline)]
-   [#\; (token-Newline)]
+   [";" (token-Newline)]
 
-   [#\= (token-Equals)]
 
    [nat  (token-Num (string->number lexeme))]
-   [(concatenation iden #\. nat) (match (string-split lexeme ".")
-                                   [(list name num) (token-IdenNum (list (string->symbol name)
-                                                                         (string->number num)))])]
-   [(concatenation iden #\. iden)  (match (string-split lexeme ".")
-                                     [(list qual name)
-                                      (token-QualIden (list (string->symbol qual)
-                                                            (string->symbol name)))])]
-   [iden  (token-UnqualIden (string->symbol lexeme))]
+
    ["(" (token-OpenParen)]
    [")" (token-CloseParen)]
-   ["->" (token-Arrow)]
    ["," (token-Comma)]
+
+
+   ; identifiers
+   [(concatenation iden #\. nat) (match (string-split lexeme ".")
+                                   [(list name num) (token-Iden (Local (string->symbol name)
+                                                                       (string->number num)))])]
+   [(concatenation iden #\. iden)  (match (string-split lexeme ".")
+                                     [(list qual name)
+                                      (token-Iden (Global (string->symbol qual)
+                                                          (string->symbol name)))])]
+   [iden  (token-Iden (Unresolved (string->symbol lexeme)))]
+
+   ; operators
+   [(concatenation op #\. nat) (match (string-split lexeme ".")
+                                 [(list name num) (token-Op (Local (string->symbol name)
+                                                                   (string->number num)))])]
+   [(concatenation iden #\. op)  (match (string-split lexeme ".")
+                                   [(list qual name)
+                                    (token-Op (Global (string->symbol qual)
+                                                      (string->symbol name)))])]
+   [op  (match lexeme
+          ["->" (token-Arrow)]
+          ["=" (token-Equals)]
+          [_
+           (token-Op (Unresolved (string->symbol lexeme)))])]
 
 
    [(eof)  (token-EOF)]))
@@ -82,8 +103,10 @@
             (error 'parse "Unexpected token ~v ~v" tok-name tok-value)))
 
    (precs (nonassoc Arrow)
+          (nonassoc Op)
           (nonassoc OpenParen)
           )
+   (debug "wtf-parser")
    (grammar
     (Program [(Statements) (Program $1)]
              [(Newline Statements) (Program $2)])
@@ -91,7 +114,16 @@
                 [(Statement) (list $1)]
                 [(Statement Newline Statements) (cons $1 $3)])
     (Statement [(Def) $1] [(Expr) $1])
-    (Def [(Iden Equals Expr) (Def $1 $3)])
+    (Def
+      [(Iden Equals Expr) (Def $1 $3)]
+      [(OpenParen Args CloseParen Equals Expr) (match $2
+                                                 ['() (error "can't define ()")]
+                                                 [(list x) (Def x $5)]
+                                                 [_ (error "can define at most 1 id at a time")]
+                                                 )]
+      ;;[(OpenParen Op CloseParen Equals Expr) (Def $2 $5)]
+      )
+    #;
     (Iden [(UnqualIden) (Unresolved $1)]
           [(IdenNum) (match $1 [(list name num) (Local name num)])]
           [(QualIden) (match $1 [(list mod name) (Global mod name)])])
@@ -109,10 +141,18 @@
                                                                              Local?))
                                                                 $2)
                                                     [#false (Func $2 $5)]
-                                                    [bad (error "bad parameter: ~v" bad)])])
+                                                    [bad (error "bad parameter: ~v" bad)])]
+
+          ; infix
+          [(Expr Op Expr) (Call $2 (list $1 $3))]
+          )
     (Args [() (list)] ; empty case, or base case with trailing comma
           [(Expr) (list $1)] ; base case with no trailing comma
-          [(Expr Comma Args) (cons $1 $3)]))))
+          [(Expr Comma Args) (cons $1 $3)]
+          ; op cases
+          [(Op) (list $1)]
+          [(Op Comma Args) (cons $1 $3)]
+          ))))
 
 (define (parse/imports lex! imports)
   (fix-scope-program (pre-parse lex!) (invert-hash-of-sets imports)))
@@ -357,6 +397,51 @@
   (check-equal? (parse-string/imports "x -> x" (hash 'm (set 'x)))
                 (Program (list (Func (list (Local 'x 0))
                                      (Local 'x 0)))))
+
+
+  ; operator syntax
+  ; - op can be a defined name, parameter, or expression
+  (check-equal? (parse-string "(+) = 1") (Program (list (Def (Global #f '+) (Lit 1)))))
+  (check-equal? (parse-string "(+) -> 1") (Program (list (Func (list (Local '+ 0)) (Lit 1)))))
+  (check-equal? (parse-string "(+, y) -> 1") (Program (list (Func (list (Local '+ 0)
+                                                                        (Local 'y 0)) (Lit 1)))))
+  (check-equal? (parse-string "(+)") (Program (list (Global #f '+))))
+  (check-equal? (parse-string "(math.+)") (Program (list (Global 'math '+))))
+  (check-equal? (parse-string "(+.3)") (Program (list (Local '+ 3))))
+  ; - simple infix
+  (check-equal? (parse-string "x + y")
+                (Program (list (Call (Global #f '+)
+                                     (list (Global #f 'x)
+                                           (Global #f 'y))))))
+  (check-equal? (parse-string "x +.123 y")
+                (Program (list (Call (Local '+ 123)
+                                     (list (Global #f 'x)
+                                           (Global #f 'y))))))
+  (check-equal? (parse-string "x math.+ y")
+                (Program (list (Call (Global 'math '+)
+                                     (list (Global #f 'x)
+                                           (Global #f 'y))))))
+  ; - op is nonassoc
+  (check-exn exn:fail?
+             (lambda () (parse-string "x + y * z")))
+  (check-equal? (parse-string "x + (y * z)")
+                (Program (list (Call (Global #f '+)
+                                     (list (Global #f 'x)
+                                           (Call (Global #f '*)
+                                                 (list (Global #f 'y)
+                                                       (Global #f 'z))))))))
+  ; - op binds tighter than lambda
+  (check-equal? (parse-string "() -> x + y")
+                (Program (list (Func '()
+                                     (Call (Global #f '+)
+                                           (list (Global #f 'x)
+                                                 (Global #f 'y)))))))
+  ; - op binds looser than call
+  (check-equal? (parse-string "x + y()")
+                (Program (list (Call (Global #f '+)
+                                     (list (Global #f 'x)
+                                           (Call (Global #f 'y) '()))))))
+
 
   ;;
   )
