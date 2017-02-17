@@ -95,29 +95,21 @@
     (Iden [(UnqualIden) (Unresolved $1)]
           [(IdenNum) (match $1 [(list name num) (Local name num)])]
           [(QualIden) (match $1 [(list mod name) (Global mod name)])])
-    (Expr [(ExprExceptIden) $1]
-          [(Iden) $1])
-    (ExprExceptIden [(Num) (Lit $1)]
-                    [(Expr OpenParen Args CloseParen) (Call $1 $3)]
+    (Expr [(Iden) $1]
+          [(Num) (Lit $1)]
 
-                    [(OpenParen ExprExceptIden CloseParen) $2]
-                    [(OpenParen Iden CloseParen) $2]
+          [(Expr OpenParen Args CloseParen) (Call $1 $3)]
+          [(OpenParen Args CloseParen) (match $2
+                                         ['() (error "empty parens")]
+                                         [(list e) e]
+                                         [_ (error "unexpected comma")])]
 
-                    ; several cases for function arrows
-                    ; x -> 1
-                    [(Iden Arrow Expr) (Func (list $1) $3)]
-                    ; (x) -> 1
-                    [(OpenParen Iden CloseParen Arrow Expr) (Func (list $2) $5)]
-                    ; (x,) -> 1
-                    [(OpenParen Iden Comma CloseParen Arrow Expr) (Func (list $2) $6)]
-                    ; () -> 1
-                    [(OpenParen CloseParen Arrow Expr) (Func '() $4)]
-                    ; (x, y, ...) -> 1
-                    [(OpenParen TwoOrMoreParams CloseParen Arrow Expr) (Func $2 $5)])
-    (NonemptyParams [(Iden) (list $1)] ; base case with no trailing comma
-                    [(Iden Comma) (list $1)] ; base case with trailing comma
-                    [(Iden Comma NonemptyParams) (cons $1 $3)])
-    (TwoOrMoreParams [(Iden Comma NonemptyParams) (cons $1 $3)])
+          [(Iden Arrow Expr) (Func (list $1) $3)]
+          [(OpenParen Args CloseParen Arrow Expr) (match (ormap (not/c (or/c Unresolved?
+                                                                             Local?))
+                                                                $2)
+                                                    [#false (Func $2 $5)]
+                                                    [bad (error "bad parameter: ~v" bad)])])
     (Args [() (list)] ; empty case, or base case with trailing comma
           [(Expr) (list $1)] ; base case with no trailing comma
           [(Expr Comma Args) (cons $1 $3)]))))
