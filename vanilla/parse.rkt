@@ -2,6 +2,7 @@
 
 (require parser-tools/lex)
 (require parser-tools/yacc)
+(require parser-tools/cfg-parser)
 (require "./util.rkt")
 
 (provide (all-from-out 'ast)
@@ -11,8 +12,8 @@
          )
 
 
-(define-tokens tokens (Num Iden Op))
-(define-empty-tokens empty-tokens (EOF Equals Newline OpenParen CloseParen Arrow Comma))
+(define-tokens nonempty-tokens (Num Iden Op))
+(define-empty-tokens empty-tokens (EOF Equals Newline OpenParen CloseParen Arrow Comma If Then Else))
 
 (define-lex-abbrev digit (char-range #\0 #\9))
 (define-lex-abbrev letter (union (char-range #\a #\z)
@@ -50,7 +51,12 @@
                                      [(list qual name)
                                       (token-Iden (Global (string->symbol qual)
                                                           (string->symbol name)))])]
-   [iden  (token-Iden (Unresolved (string->symbol lexeme)))]
+   [iden  (match lexeme
+            ["if" (token-If)]
+            ["then" (token-Then)]
+            ["else" (token-Else)]
+            [_
+             (token-Iden (Unresolved (string->symbol lexeme)))])]
 
    ; operators
    [(concatenation op #\. nat) (match (string-split lexeme ".")
@@ -91,64 +97,56 @@
   (struct Unresolved (name) #:transparent)
 
   (struct Func (params body) #:transparent)
-  (struct Call (func args) #:transparent))
+  (struct Call (func args) #:transparent)
+  (struct If (test consq alt) #:transparent)
+
+  )
 (require 'ast)
 
 (define pre-parse
-  (parser
-   (tokens tokens empty-tokens)
-   (start Program)
+  (cfg-parser
+   (tokens nonempty-tokens empty-tokens)
+   (start Prog)
    (end EOF)
    (error (lambda (tok-ok? tok-name tok-value)
             (error 'parse "Unexpected token ~v ~v" tok-name tok-value)))
-
-   (precs (nonassoc Arrow)
-          (nonassoc Op)
-          (nonassoc OpenParen)
-          )
-   (debug "wtf-parser")
    (grammar
-    (Program [(Statements) (Program $1)]
-             [(Newline Statements) (Program $2)])
+    (Prog [(Statements) (Program $1)]
+          [(Newline Statements) (Program $2)]
+          )
     (Statements [() (list)]
                 [(Statement) (list $1)]
                 [(Statement Newline Statements) (cons $1 $3)])
-    (Statement [(Def) $1] [(Expr) $1])
-    (Def
+    (Statement [(Definition) $1] [(Expr) $1])
+    (Definition
       [(Iden Equals Expr) (Def $1 $3)]
-      [(OpenParen Args CloseParen Equals Expr) (match $2
-                                                 ['() (error "can't define ()")]
-                                                 [(list x) (Def x $5)]
-                                                 [_ (error "can define at most 1 id at a time")]
-                                                 )]
-      ;;[(OpenParen Op CloseParen Equals Expr) (Def $2 $5)]
+      [(OpenParen Op CloseParen Equals Expr) (Def $2 $5)]
       )
-    #;
-    (Iden [(UnqualIden) (Unresolved $1)]
-          [(IdenNum) (match $1 [(list name num) (Local name num)])]
-          [(QualIden) (match $1 [(list mod name) (Global mod name)])])
-    (Expr [(Iden) $1]
-          [(Num) (Lit $1)]
 
-          [(Expr OpenParen Args CloseParen) (Call $1 $3)]
-          [(OpenParen Args CloseParen) (match $2
-                                         ['() (error "empty parens")]
-                                         [(list e) e]
-                                         [_ (error "unexpected comma")])]
-
+    (Expr [(If Arith Then Arith Else Arith) (If $2 $4 $6)]
           [(Iden Arrow Expr) (Func (list $1) $3)]
-          [(OpenParen Args CloseParen Arrow Expr) (match (ormap (not/c (or/c Unresolved?
-                                                                             Local?))
-                                                                $2)
-                                                    [#false (Func $2 $5)]
-                                                    [bad (error "bad parameter: ~v" bad)])]
+          [(OpenParen Params CloseParen Arrow Arith) (match (ormap (not/c (or/c Unresolved?
+                                                                                Local?))
+                                                                   $2)
+                                                       [#false (Func $2 $5)]
+                                                       [bad (error "bad parameter: ~v" bad)])]
+          [(Arith) $1])
+    (Arith [(Term Op Term) (Call $2 (list $1 $3))]
+           [(Op Term) (Call $1 (list $2))]
+           [(Term) $1])
+    (Term [(Term OpenParen Args CloseParen) (Call $1 $3)]
 
-          ; infix
-          [(Expr Op Expr) (Call $2 (list $1 $3))]
-          ; prefix
-          [(Op Expr) (Call $1 (list $2))]
+          [(Iden) $1]
+          [(Num) (Lit $1)]
+          [(Op) $1]
 
-          )
+          ; paren nest
+          [(OpenParen Expr CloseParen) $2])
+    (Params [() (list)]
+            [(Param) (list $1)]
+            [(Param Comma Args) (cons $1 $3)])
+    (Param [(Iden) $1]
+           [(Op) $1])
     (Args [() (list)] ; empty case, or base case with trailing comma
           [(Expr) (list $1)] ; base case with no trailing comma
           [(Expr Comma Args) (cons $1 $3)]
