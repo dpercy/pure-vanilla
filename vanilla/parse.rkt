@@ -123,13 +123,13 @@
       [(OpenParen Op CloseParen Equals Expr) (Def $2 $5)]
       )
 
-    (Expr [(If Arith Then Arith Else Arith) (If $2 $4 $6)]
+    (Expr [(If Expr Then Expr Else Expr) (If $2 $4 $6)]
           [(Iden Arrow Expr) (Func (list $1) $3)]
-          [(OpenParen Params CloseParen Arrow Arith) (match (ormap (not/c (or/c Unresolved?
-                                                                                Local?))
-                                                                   $2)
-                                                       [#false (Func $2 $5)]
-                                                       [bad (error "bad parameter: ~v" bad)])]
+          [(OpenParen Params CloseParen Arrow Expr) (match (ormap (not/c (or/c Unresolved?
+                                                                               Local?))
+                                                                  $2)
+                                                      [#false (Func $2 $5)]
+                                                      [bad (error "bad parameter: ~v" bad)])]
           [(Arith) $1])
     (Arith [(Term Op Term) (Call $2 (list $1 $3))]
            [(Op Term) (Call $1 (list $2))]
@@ -237,7 +237,10 @@
                (fix-scope-expr p imports-rev local-env*))
              (fix-scope-expr body imports-rev local-env*)))]
     [(Call func args)  (Call (recur func)
-                             (map recur args))]))
+                             (map recur args))]
+    [(If test consq alt) (If (recur test)
+                             (recur consq)
+                             (recur alt))]))
 
 (define explicit-locals ; expr -> set( Local )
   (memoize
@@ -254,7 +257,9 @@
        [(Func params body) (apply set-union
                                   (map explicit-locals (cons body params)))]
        [(Call func args)  (apply set-union
-                                 (map explicit-locals (cons func args)))]))))
+                                 (map explicit-locals (cons func args)))]
+       [(If test consq alt)  (apply set-union
+                                    (map explicit-locals (list test consq alt)))]))))
 
 (define (parse-string/imports str imports)
   (let* ([port (open-input-string str)]
@@ -450,6 +455,21 @@
   (check-exn exn:fail?
              (lambda () (parse-string "- x + y")))
 
+
+
+
+
+  ;; bigger tests
+  (check-equal? (parse-string "mkpair = (left, right) -> selector -> selector(left, right)")
+                (Program
+                 (list
+                  (Def (Global #f 'mkpair)
+                    (Func (list (Local 'left 0)
+                                (Local 'right 0))
+                          (Func (list (Local 'selector 0))
+                                (Call (Local 'selector 0)
+                                      (list (Local 'left 0)
+                                            (Local 'right 0)))))))))
 
   ;;
   )

@@ -4,7 +4,7 @@
 
 (require racket/syntax)
 (require (submod "./parse.rkt" ast))
-(require (for-template (only-in "./runtime.rkt" Function)))
+(require (for-template "./runtime.rkt"))
 
 
 (define (compile ast) ; -> syntax-object or list of syntax-object
@@ -25,12 +25,12 @@
 
     [(Func params body)  #`(Function (lambda #,(map compile params)
                                        #,(compile body))
-                                     #,(let ([v (compile-template ast (set))])
-                                         (displayln "ct")
-                                         (displayln (syntax->datum v))
-                                         v))]
+                                     #,(compile-template ast (set)))]
     [(Call func args)  #`(#%app #,(compile func)
-                                #,@(map compile args))]))
+                                #,@(map compile args))]
+    [(If test consq alt) #`(if (boolean=? #true #,(compile test))
+                               #,(compile consq)
+                               #,(compile alt))]))
 
 ; compile-template "quotes" the ast:
 ; it produces a syntax-object that when evaluated returns that AST.
@@ -42,13 +42,12 @@
   (match ast
     [(Local name number)  (if (set-member? env ast)
                               #`(quote #,ast)
-                              (format-id #f "~a.~a" name number))]
+                              #`(value->syntax #,(format-id #f "~a.~a" name number)))]
     [(Global mod name)  #`(quote #,ast)]
 
     [(Lit value)  #`(quote #,ast)]
     [(Unresolved name)  (error 'compile "Unresolved identifier: ~s" name)]
 
-    ; TODO also include the raw syntax structs!
     [(Func params body)  (let ([env (for/fold ([env env]) ([p params])
                                       (set-add env p))])
                            #`(Func (list #,@(for/list ([p params])
@@ -56,4 +55,7 @@
                                    #,(compile-template body env)))]
     [(Call func args)  #`(Call #,(compile-template func env)
                                (list #,@(for/list ([a args])
-                                          (compile-template a env))))]))
+                                          (compile-template a env))))]
+    [(If test consq alt)  #`(If #,(compile-template test  env)
+                                #,(compile-template consq env)
+                                #,(compile-template alt   env))]))

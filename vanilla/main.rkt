@@ -5,6 +5,7 @@
 (provide #%module-begin
          #%top-interaction
          Function
+         value->syntax
          )
 
 (module reader syntax/module-reader
