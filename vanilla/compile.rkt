@@ -9,7 +9,9 @@
 
 (define (compile ast) ; -> syntax-object or list of syntax-object
   (match ast
-    [(Program statements) (map compile statements)]
+    [(Program statements) (cons
+                           #'(require vanilla/runtime)
+                           (map compile statements))]
     ; TODO see ./macro-demos for how to do the correct evaluation order
     [(Def var expr) #`(begin
                         (provide (rename-out [#,(compile var)
@@ -18,7 +20,9 @@
     ; all generated identifiers have a dot.
     ; nice side effect: no conflict with Racket ids (quote, lambda, etc).
     [(Local name number)  (format-id #f "~a.~a" name number)]
-    [(Global mod name)  (format-id #f "~a.~a" (or mod "") name)]
+    ;;[(Global mod name)  (format-id #f "~a.~a" (or mod "") name)]
+    [(Global #f name)  (format-id #f ".~a" name)]
+    [(Global 'Base name)  (format-id #'Base.+ "Base.~a" name)]
 
     [(Lit value)  #`(quote #,value)]
     [(Unresolved name)  (error 'compile "Unresolved identifier: ~s" name)]

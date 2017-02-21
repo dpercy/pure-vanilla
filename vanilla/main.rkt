@@ -16,11 +16,9 @@
 
   (require "./parse.rkt")
   (require "./compile.rkt")
+  (require (only-in "./runtime.rkt" base-exported-names))
 
   (define (parse-and-compile-module source-name port)
-    (define ast (parse-port/imports port (hash)))
-    (displayln ast)
+    (define ast (parse-port/imports port (hash 'Base (base-exported-names))))
     (define stx (compile ast))
-    (displayln stx)
-    (displayln (map syntax->datum stx))
     stx))

@@ -14,3 +14,21 @@
   (match v
     [(Function _ syntax) syntax]
     [v (Lit v)]))
+
+
+(define (base-exported-names)
+  (define-values {exp-values exp-syntax} (module->exports 'vanilla/runtime))
+  ; exp-values is an alist mapping phase-numbers to "exports".
+  (define exports (rest (assoc 0 exp-values)))
+  ; each "export" is (list/c symbol origin-list).
+  (define (base-name sym) ; 'Base.foo -> 'foo
+    (let ([str (symbol->string sym)])
+      (and (string-prefix? str "Base.")
+           (string->symbol (string-replace str "Base." "")))))
+  (filter-map base-name (map first exports)))
+
+
+(define Base.+ (Function + (Global 'Base '+)))
+(define Base.- (Function - (Global 'Base '-)))
+(define Base.< (Function < (Global 'Base '<)))
+(define Base.== (Function equal? (Global 'Base '==)))
