@@ -8,29 +8,14 @@
 (require (for-template "./runtime.rkt"))
 
 
-; https://lists.racket-lang.org/users/archive/2012-July/052937.html
-; DrRacket's "Check Syntax" button only shows arrows for identifiers
-; with a special "syntax-original?" marker on them.
-; Normally read-syntax sets the marker, but my custom parser does not.
-; This function adds the mark manually.
-(define (sym->original-syntax sym srcloc)
-  ; Note the use of (format "~s" _) to convert the symbol to a string.
-  ; This is important in case the symbol->string representation contains
-  ; special characters which would break the write/read round trip.
-  (define p (open-input-string (format "~s" sym)))
-  (port-count-lines! p)
-  (match-define (list source-name line column position span) srcloc)
-  (set-port-next-location! p line column position)
-  (read-syntax source-name p))
-
 (define (wrap-stx ast stx)
   (if (syntax? stx)
-      (if (identifier? stx)
-          (sym->original-syntax (syntax-e stx)
-                                (Syntax-loc ast))
-          (datum->syntax stx
-                         (syntax-e stx)
-                         (Syntax-loc ast)))
+      (datum->syntax stx
+                     (syntax-e stx)
+                     (Syntax-loc ast)
+                     ; 4th arg is prop: syntax properties.
+                     ; this includes a special mark read by Check Syntax.
+                     #'())
       stx))
 
 (define (compile ast) ; -> syntax-object or list of syntax-object
