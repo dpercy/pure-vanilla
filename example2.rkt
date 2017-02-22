@@ -21,8 +21,5 @@ z = x Base.+ y
 
 fib = (n) -> if n < 2 then n else fib(n - 1) + fib(n - 2)
 
-f = () -> g() + 1
-g = () -> h() + 2
-h = () -> 3
 
-v = h()
+mylst = [1, 2, 3]

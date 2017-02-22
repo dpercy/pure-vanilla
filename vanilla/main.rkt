@@ -1,12 +1,27 @@
 #lang racket
 
-(require "runtime.rkt")
-
 (provide #%module-begin
-         #%top-interaction
+         (rename-out [top-interaction #%top-interaction])
          Function
          value->syntax
          )
+
+(require "runtime.rkt")
+(require (prefix-in racket: racket))
+
+
+(define-syntax (top-interaction stx)
+  (syntax-case stx ()
+    [(_ . e)
+     ; HACK: stuff like #%app, #%datum should just be exported in main.rkt,
+     ; but I was getting "ambiguous identifier", so instead I locally bind them in
+     ; each #%top-interaction expression.
+     (with-syntax ([#%app   (datum->syntax stx '#%app)]
+                   [#%datum (datum->syntax stx '#%datum)])
+       #'(let-syntax
+             ([#%app   (syntax-rules () [(_ . b) (racket:#%app . b)])]
+              [#%datum (syntax-rules () [(_ . b) (racket:#%datum . b)])])
+           e))]))
 
 (module reader syntax/module-reader
   #:whole-body-readers? #true

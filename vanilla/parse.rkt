@@ -14,7 +14,7 @@
 
 
 (define-tokens nonempty-tokens (Num Identifier Operator))
-(define-empty-tokens empty-tokens (EOF Equals Newline OpenParen CloseParen Arrow Comma If Then Else))
+(define-empty-tokens empty-tokens (EOF Equals Newline OpenParen CloseParen OpenBracket CloseBracket Arrow Comma If Then Else))
 
 (define-lex-abbrev digit (char-range #\0 #\9))
 (define-lex-abbrev letter (union (char-range #\a #\z)
@@ -39,6 +39,8 @@
 
    [nat  (token-Num (string->number lexeme))]
 
+   ["[" (token-OpenBracket)]
+   ["]" (token-CloseBracket)]
    ["(" (token-OpenParen)]
    [")" (token-CloseParen)]
    ["," (token-Comma)]
@@ -173,6 +175,7 @@
            [(Op Term) (Call (pos) $1 (list $2))]
            [(Term) $1])
     (Term [(Term OpenParen Args CloseParen) (Call (pos) $1 $3)]
+          [(OpenBracket Args CloseBracket) (Call (pos) (Global #f 'Base 'list) $2)]
 
           [(Iden) $1]
           [(Num) (Lit (pos) $1)]

@@ -22,7 +22,7 @@
   (wrap-stx
    ast
    (match ast
-     [(Program _ statements) (cons
+     [(Program _ statements) (list*
                               (datum->syntax #f (list #'require 'vanilla/runtime))
                               (map compile statements))]
      ; TODO see ./macro-demos for how to do the correct evaluation order

@@ -13,6 +13,8 @@
 (define (value->syntax v)
   (match v
     [(Function _ syntax) syntax]
+    [(? list?) (Call #f (Global #f 'Base 'list)
+                     (map value->syntax v))]
     [v (Lit #f v)]))
 
 
@@ -32,3 +34,4 @@
 (define Base.- (Function - (Global #f 'Base '-)))
 (define Base.< (Function < (Global #f 'Base '<)))
 (define Base.== (Function equal? (Global #f 'Base '==)))
+(define Base.list (Function list (Global #f 'Base 'list)))
