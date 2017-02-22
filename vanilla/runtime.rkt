@@ -13,7 +13,7 @@
 (define (value->syntax v)
   (match v
     [(Function _ syntax) syntax]
-    [v (Lit v)]))
+    [v (Lit #f v)]))
 
 
 (define (base-exported-names)
@@ -28,7 +28,7 @@
   (filter-map base-name (map first exports)))
 
 
-(define Base.+ (Function + (Global 'Base '+)))
-(define Base.- (Function - (Global 'Base '-)))
-(define Base.< (Function < (Global 'Base '<)))
-(define Base.== (Function equal? (Global 'Base '==)))
+(define Base.+ (Function + (Global #f 'Base '+)))
+(define Base.- (Function - (Global #f 'Base '-)))
+(define Base.< (Function < (Global #f 'Base '<)))
+(define Base.== (Function equal? (Global #f 'Base '==)))
