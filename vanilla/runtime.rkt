@@ -34,4 +34,15 @@
 (define Base.- (Function - (Global #f 'Base '-)))
 (define Base.< (Function < (Global #f 'Base '<)))
 (define Base.== (Function equal? (Global #f 'Base '==)))
+(define (show v)
+  ;; TODO implement show in terms of value->syntax and show syntax.
+  (format "~v" v))
+(define Base.show (Function show (Global #f 'Base 'show)))
+
 (define Base.list (Function list (Global #f 'Base 'list)))
+(define Base.isEmpty (Function empty? (Global #f 'Base 'isEmpty)))
+(define Base.cons (Function list (Global #f 'Base 'cons)))
+(define Base.first (Function first (Global #f 'Base 'first)))
+(define Base.rest (Function rest (Global #f 'Base 'rest)))
+
+(define Base.error (Function error (Global #f 'Base 'error)))

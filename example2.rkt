@@ -23,3 +23,5 @@ fib = (n) -> if n < 2 then n else fib(n - 1) + fib(n - 2)
 
 
 mylst = [1, 2, 3]
+
+v = show(mylst)

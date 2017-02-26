@@ -1,10 +1,11 @@
+#lang vanilla
 # http://adventofcode.com/2016/day/1
 
 main = (input) ->
   let inp = parse(input) in
   show([
     measure(interp(initialState, inp)),
-    # trace returns the list of each state we were at after each instruction.
+    # trace returns the list of each state we were at after each instructionf
     # map stateLoc extracts just the position information.
     # uniqAdjacent removes duplicates that result from "L" and "R" instructions.
     # findFirstDup finds the first position we visited twice.
@@ -68,7 +69,7 @@ parseTok = (tok) ->
   # Instead of parsing R3 as ["R", 3], parse it as ["R", 1, 1, 1].
   # It's important to consider every 1-unit step separately,
   # because the set of "seen" locations has to count every point we pass through.
-  [slice(tok, 0, 1), ...replicate(parseInt(slice(tok, 1, length(tok))), 1)]
+  cons(slice(tok, 0, 1), replicate(parseInt(slice(tok, 1, length(tok))), 1))
 
 findFirstDup = (lst) -> dupLoop([], lst)
 dupLoop = (seen, lst) ->

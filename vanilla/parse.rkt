@@ -13,8 +13,8 @@
          )
 
 
-(define-tokens nonempty-tokens (Num Identifier Operator))
-(define-empty-tokens empty-tokens (EOF Equals Newline OpenParen CloseParen OpenBracket CloseBracket Arrow Comma If Then Else))
+(define-tokens nonempty-tokens (Literal Identifier Operator))
+(define-empty-tokens empty-tokens (EOF Equals Newline OpenParen CloseParen OpenBracket CloseBracket Arrow Comma If Then Else Let In))
 
 (define-lex-abbrev digit (char-range #\0 #\9))
 (define-lex-abbrev letter (union (char-range #\a #\z)
@@ -25,6 +25,9 @@
 (define-lex-abbrev op (repetition 1 +inf.0 (char-set "~!@$%^&*-+=:<>/?|\\")))
 
 (define-lex-abbrev nat (repetition 1 +inf.0 digit))
+(define-lex-abbrev comment (concatenation #\#
+                                          (repetition 0 +inf.0 (char-complement #\newline))))
+(define-lex-abbrev maybe-comment (repetition 0 1 comment))
 (define lex
   (lexer-src-pos
    ; TODO implement comments as an actual token?
@@ -32,12 +35,22 @@
    [(repetition 1 +inf.0
                 (intersection whitespace
                               (char-complement #\newline)))  (return-without-pos (lex input-port))]
+   [comment (return-without-pos (lex input-port))]
    ; a newline plus any mixture of whitespace and newlines is a Newline token
-   [(concatenation #\newline (repetition 0 +inf.0 whitespace))  (token-Newline)]
+   [(concatenation #\newline
+                   (repetition 0 +inf.0
+                               (concatenation maybe-comment
+                                              whitespace)))  (token-Newline)]
    [";" (token-Newline)]
 
 
-   [nat  (token-Num (string->number lexeme))]
+   [nat  (token-Literal (string->number lexeme))]
+   [(concatenation #\"
+                   (repetition 0 +inf.0 (char-complement (union #\\
+                                                                #\")))
+                   #\")
+    ; TODO escapes
+    (token-Literal (read (open-input-string lexeme)))]
 
    ["[" (token-OpenBracket)]
    ["]" (token-CloseBracket)]
@@ -57,9 +70,11 @@
                                                                 (string->symbol qual)
                                                                 (string->symbol name)))])]
    [iden  (match lexeme
-            ["if" (token-If)]
+            ["if"   (token-If)]
             ["then" (token-Then)]
             ["else" (token-Else)]
+            ["let"  (token-Let)]
+            ["in"   (token-In)]
             [_
              (token-Identifier (Unresolved #f (string->symbol lexeme)))])]
 
@@ -149,6 +164,8 @@
             #;
             (error 'parse "Unexpected token ~v ~v" tok-name tok-value)))
    (grammar
+    (N [(Newline) (void)]
+       [() (void)])
     (Prog [(Statements) (Program (pos) $1)]
           [(Newline Statements) (Program (pos) $2)]
           )
@@ -163,13 +180,20 @@
 
     (Iden [(Identifier) (pos-id (pos) $1)])
     (Op [(Operator) (pos-id (pos) $1)])
-    (Expr [(If Expr Then Expr Else Expr) (If (pos) $2 $4 $6)]
-          [(Iden Arrow Expr) (Func (pos) (list $1) $3)]
-          [(OpenParen Params CloseParen Arrow Expr) (match (ormap (not/c (or/c Unresolved?
-                                                                               Local?))
-                                                                  $2)
-                                                      [#false (Func (pos) $2 $5)]
-                                                      [bad (error "bad parameter: ~v" bad)])]
+    (Expr [(If Expr N Then Expr N Else Expr) (If (pos) $2 $5 $8)]
+
+          [(Iden Arrow N Expr) (Func (pos) (list $1) $4)]
+          [(OpenParen Params CloseParen Arrow N Expr) (match (ormap (not/c (or/c Unresolved?
+                                                                                 Local?))
+                                                                    $2)
+                                                        [#false (Func (pos) $2 $6)]
+                                                        [bad (error "bad parameter: ~v" bad)])]
+
+          [(Let Iden Equals Expr In N Expr) (Call (pos)
+                                                  (Func #f (list $2)
+                                                        $7)
+                                                  (list $4))]
+
           [(Arith) $1])
     (Arith [(Term Op Term) (Call (pos) $2 (list $1 $3))]
            [(Op Term) (Call (pos) $1 (list $2))]
@@ -178,7 +202,7 @@
           [(OpenBracket Args CloseBracket) (Call (pos) (Global #f 'Base 'list) $2)]
 
           [(Iden) $1]
-          [(Num) (Lit (pos) $1)]
+          [(Literal) (Lit (pos) $1)]
           [(Op) $1]
 
           ; paren nest
@@ -188,12 +212,12 @@
             [(Param Comma Args) (cons $1 $3)])
     (Param [(Iden) $1]
            [(Op) $1])
-    (Args [() (list)] ; empty case, or base case with trailing comma
-          [(Expr) (list $1)] ; base case with no trailing comma
-          [(Expr Comma Args) (cons $1 $3)]
+    (Args [(N) (list)] ; empty case, or base case with trailing comma
+          [(N Expr N) (list $2)] ; base case with no trailing comma
+          [(N Expr Comma Args) (cons $2 $4)]
           ; op cases
-          [(Op) (list $1)]
-          [(Op Comma Args) (cons $1 $3)]
+          [(N Op N) (list $1)]
+          [(N Op Comma Args) (cons $2 $4)]
           ))))
 
 (define (parse/imports lex! imports source-name)

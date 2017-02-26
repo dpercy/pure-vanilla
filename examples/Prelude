@@ -1,3 +1,4 @@
+#lang vanilla
 # TODO implement actual parsing for boolean literals...
 true = 1 == 1
 false = 1 == 0
@@ -12,8 +13,6 @@ not = (x) -> if x then false else true
 
 
 # list functions
-
-cons = (hd, tl) -> [hd, ...tl]
 
 elem = (x, lst) ->
   if isEmpty(lst) then false
@@ -35,7 +34,7 @@ take = (n, lst) ->
   if isEmpty(lst) then []
   else if n == 0 then []
   else if n > 0 then cons(first(lst), take(n - 1, rest(lst)))
-  else error("take negative")
+else error("take negative")
 
 drop = (n, lst) ->
   if isEmpty(lst) then []
@@ -70,7 +69,7 @@ dropWhile = (pred, lst) ->
 
 map = (f, lst) ->
   if isEmpty(lst) then []
-  else [ f(first(lst)), ...map(f, rest(lst)) ]
+  else cons(f(first(lst)), map(f, rest(lst)))
 
 foldl = (f, init, lst) ->
   if isEmpty(lst) then init
