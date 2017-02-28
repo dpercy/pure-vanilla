@@ -3,8 +3,7 @@
 (provide #%module-begin
          (rename-out [top-interaction #%top-interaction])
          Function
-         value->syntax
-         )
+         value->syntax)
 
 (require "runtime.rkt")
 (require (prefix-in racket: racket))
@@ -30,7 +29,11 @@
   #:language 'vanilla
   #:info (lambda (request default fallback)
            (case request
-
+             #;
+             [(color-lexer)
+              ; see /Applications/Racket v6.8/share/pkgs/datalog/tool/syntax-color.rkt
+              ;  fn get-syntax-token
+              ]
              [else
               (print (list 'dont-understand request default fallback))
               (newline)
