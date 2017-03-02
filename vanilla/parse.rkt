@@ -10,6 +10,7 @@
          parse-string
          parse-string/imports
          parse-port/imports
+         show-syntax
          )
 
 
@@ -543,3 +544,95 @@
 
   ;;
   )
+
+
+(define (show-syntax ast)
+  (define r show-syntax)
+  (define (r* asts delim)
+    (apply string-append
+           (add-between (map r asts)
+                        delim)))
+  (define (r-callee ast)
+    (define s (r ast))
+    (match ast
+      [(Lit _ _) s]
+      [(Local _ _ _) s]
+      [(Global _ _ _) s]
+      [(Call _ _ _) s]
+      [_ (format "(~a)" s)]))
+  (define (operator-symbol? s)
+    (not (regexp-match? "[a-zA-Z]" (symbol->string s))))
+  (match ast
+    [(Program _ statements) (r* statements "\n")]
+    [(Def _ var expr) (format "~a = ~a" (r var) (r expr))]
+    [(Lit _ v) (format "~v" v)]
+    [(Local _ name number)
+     (if (operator-symbol? name)
+         (format "(~a.~a)" name number)
+         (format "~a.~a" name number))]
+    [(Global _ #f name)
+     (if (operator-symbol? name)
+         (format "(~a)" name)
+         (format "~a" name))]
+    [(Global _ mod name)
+     (if (operator-symbol? name)
+         (format "(~a.~a)" mod name)
+         (format "~a.~a" mod name))]
+    [(Unresolved _ name) (format "#<unresolved ~a>" name)]
+    [(Func _ params body) (format "(~a) -> ~a"
+                                  (r* params ", ")
+                                  (r body))]
+
+    ; list special case
+    [(Call _ (Global _ 'Base 'list) args) (format "[~a]" (r* args ", "))]
+
+    ; general case for function call
+    [(Call _ func args) (format "~a(~a)"
+                                (r-callee func)
+                                (r* args ", "))]
+
+    [(If _ t c a) (format "if ~a then ~a else ~a"
+                          (r t)
+                          (r c)
+                          (r a))]))
+(module+ test
+
+  ; TODO do a better job with concrete syntax / precedence
+  (check-equal? (show-syntax (Call #f (Global #f 'Base '+)
+                                   (list (Lit #f 1) (Lit #f 2))))
+                "(Base.+)(1, 2)")
+  (check-equal? (show-syntax (Call #f (Global #f 'Base '+)
+                                   (list (Call #f (Global #f 'Base '+)
+                                               (list (Lit #f 1) (Lit #f 2)))
+                                         (Call #f (Global #f 'Base '+)
+                                               (list (Lit #f 3) (Lit #f 4))))))
+                "(Base.+)((Base.+)(1, 2), (Base.+)(3, 4))")
+
+  (check-equal? (show-syntax (Call #f (If #f
+                                          (Lit #f 1)
+                                          (Lit #f 2)
+                                          (Lit #f 3)) '()))
+                "(if 1 then 2 else 3)()")
+  (check-equal? (show-syntax (If #f
+                                 (Lit #f 1)
+                                 (Lit #f 2)
+                                 (Call #f (Lit #f 3) '())))
+                "if 1 then 2 else 3()")
+
+  ; TODO remove parens around lone param
+  (check-equal? (show-syntax (Func #f
+                                   (list (Local #f 'x 0))
+                                   (Call #f (Lit #f 123) '())))
+                "(x.0) -> 123()")
+  (check-equal? (show-syntax (Call #f (Func #f
+                                            (list (Local #f 'x 0))
+                                            (Lit #f 123)) '()))
+                "((x.0) -> 123)()")
+  (check-equal? (show-syntax (Func #f
+                                   '()
+                                   (Call #f (Lit #f 123) '())))
+                "() -> 123()")
+  (check-equal? (show-syntax (Call #f (Func #f
+                                            '()
+                                            (Lit #f 123)) '()))
+                "(() -> 123)()"))

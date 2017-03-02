@@ -2,7 +2,8 @@
 
 (provide (all-defined-out))
 
-(require (submod "parse.rkt" ast))
+(require (submod "parse.rkt" ast)
+         "parse.rkt")
 
 (struct Function (procedure syntax)
   ; TODO put a syntax-thunk here instead, to avoid constructing all the syntax nodes
@@ -32,8 +33,7 @@
 
 
 (define (show v)
-  ;; TODO implement show in terms of value->syntax and show syntax.
-  (format "~v" v))
+  (show-syntax (value->syntax v)))
 
 (define (foldl-haskell-style f init lst)
   (match lst
