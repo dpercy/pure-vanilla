@@ -14,6 +14,7 @@
 (define (value->syntax v)
   (match v
     [(Function _ syntax) syntax]
+    [(? Syntax? ast) (Quote #f ast)]
     [(? list?) (Call #f (Global #f 'Base 'list)
                      (map value->syntax v))]
     [v (Lit #f v)]))

@@ -15,7 +15,7 @@
 
 
 (define-tokens nonempty-tokens (Literal Identifier Operator))
-(define-empty-tokens empty-tokens (EOF Equals Newline OpenParen CloseParen OpenBracket CloseBracket Arrow Comma If Then Else Let In))
+(define-empty-tokens empty-tokens (EOF Colon Equals Newline OpenParen CloseParen OpenBracket CloseBracket Arrow Comma If Then Else Let In))
 
 (define-lex-abbrev digit (char-range #\0 #\9))
 (define-lex-abbrev letter (union (char-range #\a #\z)
@@ -23,7 +23,7 @@
 
 (define-lex-abbrev iden (concatenation letter
                                        (repetition 0 +inf.0 (union letter digit))))
-(define-lex-abbrev op (repetition 1 +inf.0 (char-set "~!@$%^&*-+=:<>/?|\\")))
+(define-lex-abbrev op (repetition 1 +inf.0 (char-set "~!@$%^&*-+=<>/?|\\")))
 
 (define-lex-abbrev nat (repetition 1 +inf.0 digit))
 (define-lex-abbrev comment (concatenation #\#
@@ -58,6 +58,7 @@
    ["(" (token-OpenParen)]
    [")" (token-CloseParen)]
    ["," (token-Comma)]
+   [":" (token-Colon)]
 
 
    ; identifiers
@@ -116,6 +117,8 @@
   (struct Def Syntax (var expr) #:transparent)
 
   (struct Lit Syntax (value) #:transparent)
+  (struct Quote Syntax (ast) #:transparent)
+
   ; `number` is not a De-Bruijn index or up-reference:
   ; it's an extension of the variable's name.
   ; Two locals are equal iff their `name` and `number` are equal.
@@ -206,6 +209,10 @@
           [(Literal) (Lit (pos) $1)]
           [(Op) $1]
 
+          [(Colon Iden) (Quote (pos) $2)]
+          [(Colon Op) (Quote (pos) $2)]
+          [(Colon OpenParen Expr CloseParen) (Quote (pos) $3)]
+
           ; paren nest
           [(OpenParen Expr CloseParen) $2])
     (Params [() (list)]
@@ -270,6 +277,7 @@
 
 
     [(Lit _ value)  expr]
+    [(Quote loc ast)  (Quote loc (recur ast))]
     [(Unresolved loc name)  (match (hash-ref local-env name #f)
                               [(? number? n)  (Local loc name n)]
                               [#false
@@ -321,7 +329,8 @@
        [(Global _ mod name)  (set)]
 
 
-       [(Lit _ value)  (set)]
+       [(Lit _ _)  (set)]
+       [(Quote _ _)  (set)]
        [(Unresolved _ name)  (set)]
 
        [(Func _ params body) (apply set-union
@@ -560,24 +569,21 @@
       [(Global _ _ _) s]
       [(Call _ _ _) s]
       [_ (format "(~a)" s)]))
-  (define (operator-symbol? s)
-    (not (regexp-match? "[a-zA-Z]" (symbol->string s))))
+  (define (op-wrap op s)
+    (if (regexp-match? "[a-zA-Z]" (symbol->string op))
+        s
+        (format "(~a)" s)))
+  (define (show-iden e)
+    (match e
+      [(Local _ name number) (format "~a.~a" name number)]
+      [(Global _ #f name)    (format "~a" name)]
+      [(Global _ mod name)   (format "~a.~a" mod name)]))
   (match ast
     [(Program _ statements) (r* statements "\n")]
     [(Def _ var expr) (format "~a = ~a" (r var) (r expr))]
     [(Lit _ v) (format "~v" v)]
-    [(Local _ name number)
-     (if (operator-symbol? name)
-         (format "(~a.~a)" name number)
-         (format "~a.~a" name number))]
-    [(Global _ #f name)
-     (if (operator-symbol? name)
-         (format "(~a)" name)
-         (format "~a" name))]
-    [(Global _ mod name)
-     (if (operator-symbol? name)
-         (format "(~a.~a)" mod name)
-         (format "~a.~a" mod name))]
+    [(Local _ name _) (op-wrap name (show-iden ast))]
+    [(Global _ _ name) (op-wrap name (show-iden ast))]
     [(Unresolved _ name) (format "#<unresolved ~a>" name)]
     [(Func _ params body) (format "(~a) -> ~a"
                                   (r* params ", ")
@@ -594,7 +600,11 @@
     [(If _ t c a) (format "if ~a then ~a else ~a"
                           (r t)
                           (r c)
-                          (r a))]))
+                          (r a))]
+
+    [(Quote _ (? (or/c Global? Local?) x)) (format ":~a" (show-iden x))]
+    [(Quote _ ast) (format ":(~a)" (r ast))]
+    ))
 (module+ test
 
   ; TODO do a better job with concrete syntax / precedence
@@ -635,4 +645,11 @@
   (check-equal? (show-syntax (Call #f (Func #f
                                             '()
                                             (Lit #f 123)) '()))
-                "(() -> 123)()"))
+                "(() -> 123)()")
+
+  (check-equal? (show-syntax (Quote #f (Local #f 'x 3)))
+                ":x.3")
+  (check-equal? (show-syntax (Quote #f (Global #f 'Base '+)))
+                ":Base.+")
+  (check-equal? (show-syntax (Quote #f (Lit #f 4)))
+                ":(4)"))

@@ -38,6 +38,7 @@
      [(Global _ 'Base name)  (format-id #f "Base.~a" name)]
 
      [(Lit _ value)  #`(quote #,value)]
+     [(Quote _ ast)  #`(quote #,ast)]
      [(Unresolved _ name)  (error 'compile "Unresolved identifier: ~s" name)]
 
      [(Func _ params body)  #`(Function (lambda #,(map compile params)
@@ -53,7 +54,7 @@
   (match ast
     [(Local _ name number) (Local #f name number)]))
 ; compile-template "quotes" the ast:
-; it produces a syntax-object that when evaluated returns that AST.
+; it produces Racket code that when evaluated returns that AST.
 ; However, any free local variables in the AST are compiled to Racket variables.
 ; This allows currying like (Function-syntax "let x = 1 in () -> f(x)")
 ; to return "() -> f(1)".
@@ -70,7 +71,9 @@
 
     [(Global _ mod name)  #`(quote #,ast)]
 
-    [(Lit _ value)  #`(quote #,ast)]
+    ; lit and quote both don't really have free variables
+    [(Lit _ _)    #`(quote #,ast)]
+    [(Quote _ _)  #`(quote #,ast)]
     [(Unresolved loc name)  (raise-syntax-error name
                                                 "Unresolved identifier"
                                                 (build-source-location-syntax loc))]
