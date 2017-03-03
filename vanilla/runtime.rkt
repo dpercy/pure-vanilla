@@ -51,6 +51,45 @@
   (check-equal? (foldl list #f '(1 2 3))
                 '(3 (2 (1 #f)))))
 
+(struct tagged (tag contents) #:transparent)
+
+(define (pack sym . args)
+  (match sym
+    [(Global _ m n) (tagged (Global #f m n) args)]))
+
+(define (unpack sym v)
+  (match sym
+    [(Global _ m n)
+     (match (as-tagged v)
+       [(tagged (Global _ m* n*) contents)  (if (and (equal? m m*)
+                                                     (equal? n n*))
+                                                contents
+                                                #false)]
+       ; this case should never happen in the object language,
+       ; but it could happen if unpack is misused in Racket.
+       [_ (error 'unpack "not a tagged value: ~v" v)])]
+    [_ (error 'unpack "not a global symbol: ~v" sym)]))
+
+(define (as-tagged v)
+  (match v
+    [(? tagged? v) v]
+    [(? Syntax? v)
+     (define (t s . body)
+       (tagged (Global #f 'Syntax s) body))
+     (match v
+       ; TODO weird that loc is hidden from inspection
+       [(Program _ statements) (t 'Program statements)]
+       [(Def _ var expr) (t 'Def var expr)]
+       [(Lit _ value) (t 'Lit value)]
+       [(Quote _ ast) (t 'Quote ast)]
+       [(Local _ name num) (t 'Local name num)]
+       [(Global _ mod name) (t 'Global mod name)]
+       [(Unresolved _ name) (t 'Unresolved name)]
+       [(Func _ params body) (t 'Func params body)]
+       [(Call _ func args) (t 'Call func args)]
+       [(If _ t c a) (t 'If t c a)])]
+    [_ (error 'as-tagged "can't be expressed as a tagged value: ~v" v)]))
+
 
 ;errors
 (define Base.error (Function error (Global #f 'Base 'error)))
@@ -58,11 +97,21 @@
 ; generic
 (define Base.show (Function show (Global #f 'Base 'show)))
 (define Base.== (Function equal? (Global #f 'Base '==)))
+(define Base.!= (Function (compose not equal?) (Global #f 'Base '!=)))
 (define Base.length (Function
                      (match-lambda
                        [(? string? s) (string-length s)]
                        [lst (length lst)])
                      (Global #f 'Base 'length)))
+(define Base.apply (Function apply (Global #f 'Base 'apply)))
+
+(define Base.true #true)
+(define Base.false #false)
+
+; syntax
+(define Base.pack (Function pack (Global #f 'Base 'pack)))
+(define Base.unpack (Function unpack (Global #f 'Base 'unpack)))
+(define Base.inspect (Function Function-syntax (Global #f 'Base 'inspect)))
 
 ; numbers
 (define Base.+ (Function + (Global #f 'Base '+)))
