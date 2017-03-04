@@ -82,13 +82,18 @@
        [(Def _ var expr) (t 'Def var expr)]
        [(Lit _ value) (t 'Lit value)]
        [(Quote _ ast) (t 'Quote ast)]
-       [(Local _ name num) (t 'Local name num)]
-       [(Global _ mod name) (t 'Global mod name)]
-       [(Unresolved _ name) (t 'Unresolved name)]
+       [(Local _ name num) (t 'Local (symbol->string name) num)]
+       [(Global _ mod name) (t 'Global (symbol->string mod) (symbol->string name))]
+       [(Unresolved _ name) (t 'Unresolved (symbol->string name))]
        [(Func _ params body) (t 'Func params body)]
        [(Call _ func args) (t 'Call func args)]
        [(If _ t c a) (t 'If t c a)])]
     [_ (error 'as-tagged "can't be expressed as a tagged value: ~v" v)]))
+
+(define (make-variadic f)
+  ; f takes a list
+  ; return a function that takes N args
+  (lambda args (f args)))
 
 
 ;errors
@@ -104,6 +109,7 @@
                        [lst (length lst)])
                      (Global #f 'Base 'length)))
 (define Base.apply (Function apply (Global #f 'Base 'apply)))
+(define Base.makeVariadic (Function make-variadic (Global #f 'Base 'makeVariadic)))
 
 (define Base.true #true)
 (define Base.false #false)
@@ -139,3 +145,7 @@
 (define Base.slice (Function substring (Global #f 'Base 'slice)))
 (define Base.replicate (Function make-list (Global #f 'Base 'replicate)))
 (define Base.parseInt (Function string->number (Global #f 'Base 'parseInt)))
+(define Base.strcat (Function string-append (Global #f 'Base 'strcat)))
+
+; functions
+(define Base.isFunc (Function procedure? (Global #f 'Base 'isFunc)))
