@@ -22,34 +22,66 @@
   (wrap-stx
    ast
    (match ast
-     [(Program _ statements) (list*
-                              (datum->syntax #f (list #'require 'vanilla/runtime))
-                              (map compile statements))]
-     ; TODO see ./macro-demos for how to do the correct evaluation order
-     ; (create a thunk or future per definition)
+     ; each def actually creates a thunk,
+     ; and a Global expression forces it.
+     [(Global _ _ _) #`(force #,(compile-id ast))]
      [(Def _ var expr) #`(begin
-                           (provide (rename-out [#,(compile var)
-                                                 #,(Global-name var)]))
-                           (define #,(compile var) #,(compile expr)))]
-     ; all generated identifiers have a dot.
-     ; nice side effect: no conflict with Racket ids (quote, lambda, etc).
-     [(Local _ name number)  (format-id #f "~a.~a" name number)]
-     ;;[(Global _ mod name)  (format-id #f "~a.~a" (or mod "") name)]
-     [(Global _ #f name)  (format-id #f ".~a" name)]
-     [(Global _ 'Base name)  (format-id #f "Base.~a" name)]
+                           (define #,(compile-id var) (delay #,(compile expr))))]
+
+     [(Program _ statements) (append
+                              ; provide
+                              (for/list ([s statements]
+                                         #:when (Def? s)
+                                         [v (in-value (Def-var s))])
+                                #`(provide (rename-out [#,(compile-id v)
+                                                        #,(Global-name v)])))
+                              ; require
+                              (list
+                               (datum->syntax #f
+                                              (list #'require 'vanilla/runtime)))
+                              (list #`(provide (rename-out
+                                                #,@(for/list ([s statements]
+                                                              #:when (Def? s))
+                                                     (let ([v (Def-var s)])
+                                                       (list (compile-id v)
+                                                             (Global-name v))))))
+                                    )
+                              ; definitions and toplevel expressions
+                              (map compile statements)
+                              ; force all the definitions
+                              (for/list ([s statements]
+                                         #:when (Def? s)
+                                         [v (in-value (Def-var s))])
+                                #`(void #,(compile v))))]
+
+
 
      [(Lit _ value)  #`(quote #,value)]
      [(Quote _ ast)  #`(quote #,ast)]
      [(Unresolved _ name)  (error 'compile "Unresolved identifier: ~s" name)]
 
+     ; locals can only refer to function parameters
+     [(Local _ _ _) (compile-id ast)]
      [(Func _ params body)  #`(Function (lambda #,(map compile params)
                                           #,(compile body))
                                         #,(compile-template ast (set)))]
+
+
      [(Call _ func args)  #`(#%app #,(compile func)
                                    #,@(map compile args))]
      [(If _ test consq alt) #`(if (boolean=? #true #,(compile test))
                                   #,(compile consq)
                                   #,(compile alt))])))
+
+(define (compile-id ast)
+  (match ast
+    ; all generated identifiers have a dot.
+    ; nice side effect: no conflict with Racket ids (quote, lambda, etc).
+    [(Local _ name number)  (format-id #f "~a.~a" name number)]
+    ;;[(Global _ mod name)  (format-id #f "~a.~a" (or mod "") name)]
+    [(Global _ #f name)  (format-id #f ".~a" name)]
+    [(Global _ 'Base name)  (format-id #f "Base.~a" name)]
+    ))
 
 (define (sl ast) ; strip loc from Local
   (match ast

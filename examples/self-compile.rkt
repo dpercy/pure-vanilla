@@ -60,4 +60,3 @@ assert(==, compile((x, y) -> y), "((x_0, y_0) => y_0)")
 assert(==, compile(x -> x + 1), "((x_0) => (x_0 + 1))")
 # TODO more math operators
 
-
