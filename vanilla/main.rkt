@@ -40,13 +40,18 @@
               (fallback request default)]))
 
   (require syntax/srcloc)
+  (require racket/path)
   (require "./parse.rkt")
   (require "./compile.rkt")
   (require (only-in "./runtime.rkt" base-exported-names))
 
   (define (parse-and-compile-module source-name port)
+    (define mod-name (string->symbol (path->string (file-name-from-path source-name))))
+    (displayln (list 'parsing mod-name 'from source-name))
     (define ast (parse-port/imports port
+                                    mod-name
                                     (hash 'Base (base-exported-names))
                                     source-name))
-    (define stx (compile ast))
+    ;;; (displayln (list 'got-ast ast))
+    (define stx (compile ast mod-name))
     stx))

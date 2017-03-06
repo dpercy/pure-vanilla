@@ -38,7 +38,8 @@
     [(Call _ func args) (apply U (r func) (map r args))]
     [(If _ t c a) (apply U (map r (list t c a)))]))
 
-(define (compile ast) ; -> syntax-object or list of syntax-object
+(define (compile ast mod-name) ; -> syntax-object or list of syntax-object
+  (define (r ast) (compile ast mod-name))
   (wrap-stx
    ast
    (match ast
@@ -46,7 +47,7 @@
      ; and a Global expression forces it.
      [(Global _ _ _) #`(force #,(compile-id ast))]
      [(Def _ var expr) #`(begin
-                           (define #,(compile-id var) (delay #,(compile expr))))]
+                           (define #,(compile-id var) (delay #,(r expr))))]
 
      [(Program _ statements) (append
                               ; provide
@@ -61,19 +62,22 @@
                                        #,(datum->syntax #f 'vanilla/runtime)))
                               (for*/list ([g (in-set (globals ast))]
                                           [m (in-value (Global-mod g))]
-                                          #:when (and m (not (equal? m 'Base))))
+                                          #:when (not (member m
+                                                              (list #false
+                                                                    'Base
+                                                                    mod-name))))
                                 #`(require (rename-in
                                             #,(list 'path-up (symbol->string m))
                                             [#,(Global-name g) #,(compile-id g)])))
                               ; definitions only
                               (for/list ([s statements]
                                          #:when (Def? s))
-                                (compile s))
+                                (r s))
                               ; force all the definitions, and run the expressions
                               (for/list ([s statements])
                                 (match s
-                                  [(Def _ var expr) #`(void #,(compile var))]
-                                  [_ (compile s)])))]
+                                  [(Def _ var expr) #`(void #,(r var))]
+                                  [_ (r s)])))]
 
      [(Lit _ value)  #`(quote #,value)]
      [(Quote _ ast)  #`(quote #,ast)]
@@ -81,16 +85,16 @@
 
      ; locals can only refer to function parameters
      [(Local _ _ _) (compile-id ast)]
-     [(Func _ params body)  #`(Function (lambda #,(map compile params)
-                                          #,(compile body))
+     [(Func _ params body)  #`(Function (lambda #,(map r params)
+                                          #,(r body))
                                         #,(compile-template ast (set)))]
 
 
-     [(Call _ func args)  #`(#%app #,(compile func)
-                                   #,@(map compile args))]
-     [(If _ test consq alt) #`(if (boolean=? #true #,(compile test))
-                                  #,(compile consq)
-                                  #,(compile alt))])))
+     [(Call _ func args)  #`(#%app #,(r func)
+                                   #,@(map r args))]
+     [(If _ test consq alt) #`(if (boolean=? #true #,(r test))
+                                  #,(r consq)
+                                  #,(r alt))])))
 
 (define (compile-id ast)
   (match ast

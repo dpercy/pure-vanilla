@@ -6,6 +6,8 @@ assert = makeVariadic((args) ->
                       let a = rest(args) in
                       let v = apply(f, a) in
                       if v then "ok" else error(strcat("assertion fail: ", show(f), show(a))))
+# test that unqualified ids in Prelude resolve to Prelude ids
+assert(==, show(:assert), show(:Prelude.assert))
 
 # TODO fix control flow on these
 # hacky non-short-circuiting boolean operators
@@ -145,3 +147,4 @@ sumBy = (key, lst) ->
 splitchars = (str) ->
   # first(split(_, "")) is always "", so drop it.
   rest(split(str, ""))
+

@@ -242,8 +242,10 @@
           [(N Op Comma Args) (cons $2 $4)]
           ))))
 
-(define (parse/imports lex! imports source-name)
-  (fix-scope-program ((pre-parse source-name) lex!) (invert-hash-of-sets imports)))
+(define (parse/imports lex! mod-name imports source-name)
+  (fix-scope-program ((pre-parse source-name) lex!)
+                     mod-name
+                     (invert-hash-of-sets imports)))
 
 (define (invert-hash-of-sets h)
   (for*/fold ([result (hash)]) ([{k s} (in-hash h)]
@@ -264,7 +266,7 @@
       #false))
 
 ; imports-rev : hash( unqual-id-name -> set( module-name ) )
-(define (fix-scope-program program imports-rev)
+(define (fix-scope-program program mod-name imports-rev)
   (match program
     [(Program loc statements)
      ; local-env : name -> number, the max of in-scope locals
@@ -272,41 +274,43 @@
      (define imports-rev*
        (for/fold ([imports-rev imports-rev]) ([stmt statements])
          (match stmt
-           [(Def _ (Unresolved _ name) _) (hash-remove imports-rev name)]
+           [(Def _ (Unresolved _ name) _) (hash-set imports-rev name (set mod-name))]
            [_ imports-rev])))
      (Program loc
               (for/list ([stmt statements])
-                (fix-scope-statement stmt imports-rev* local-env)))]))
-(define (fix-scope-statement stmt imports-rev local-env)
+                (fix-scope-statement stmt mod-name imports-rev* local-env)))]))
+(define (fix-scope-statement stmt mod-name imports-rev local-env)
   (match stmt
     [(Def loc var expr) (Def loc
-                          (fix-scope-expr var imports-rev local-env)
-                          (fix-scope-expr expr imports-rev local-env))]
-    [expr (fix-scope-expr expr imports-rev local-env)]))
-(define (fix-scope-expr expr imports-rev local-env)
-  (define (recur expr) (fix-scope-expr expr imports-rev local-env))
+                          (fix-scope-expr var mod-name imports-rev local-env)
+                          (fix-scope-expr expr mod-name imports-rev local-env))]
+    [expr (fix-scope-expr expr mod-name imports-rev local-env)]))
+(define (fix-scope-expr expr mod-name imports-rev local-env)
+  (define (recur expr) (fix-scope-expr expr mod-name imports-rev local-env))
   (match expr
     [(Local _ name number)  expr]
     [(Global _ mod name)  expr]
 
-
     [(Lit _ value)  expr]
     [(Quote loc ast)  (Quote loc (recur ast))]
-    [(Unresolved loc name)  (match (hash-ref local-env name #f)
-                              [(? number? n)  (Local loc name n)]
-                              [#false
-
-                               (match (hash-ref imports-rev name #f)
-                                 ; TODO should unbound unqual ID be an error?
-                                 ; IDs should refer to definitions!
-                                 [#false (Global loc #f name)]
-                                 [(app unwrap-unary-set (list m)) (Global loc m name)]
-                                 [choices (error 'fix-scope
-                                                 "Ambiguous reference ~a: could refer to ~a"
-                                                 name
-                                                 (string-join (for/list ([m choices])
-                                                                (format "~s.~s" m name))
-                                                              " or "))])])]
+    [(Unresolved loc name)
+     ; 1. check local-env -> make a local
+     (match (hash-ref local-env name #f)
+       [(? number? n)  (Local loc name n)]
+       [#false
+        ; 2. check imports -> resolve to a global
+        (match (hash-ref imports-rev name #f)
+          ; 3. not found anywhere -> default to current module
+          ; TODO should unbound unqual ID be an error?
+          ; IDs should refer to definitions!
+          [#false (Global loc #f name)]
+          [(app unwrap-unary-set (list m)) (Global loc m name)]
+          [choices (error 'fix-scope
+                          "Ambiguous reference ~a: could refer to ~a"
+                          name
+                          (string-join (for/list ([m choices])
+                                         (format "~s.~s" m name))
+                                       " or "))])])]
 
     [(Func loc params body)
      (let ([local-env* (for/fold ([local-env local-env]) ([p params])
@@ -324,8 +328,8 @@
                             (hash-set local-env name num)]))])
        (Func loc
              (for/list ([p params])
-               (fix-scope-expr p imports-rev local-env*))
-             (fix-scope-expr body imports-rev local-env*)))]
+               (fix-scope-expr p mod-name imports-rev local-env*))
+             (fix-scope-expr body mod-name imports-rev local-env*)))]
     [(Call loc func args)  (Call loc
                                  (recur func)
                                  (map recur args))]
@@ -358,12 +362,12 @@
   (let* ([port (open-input-string str)]
          [lex! (lambda () (lex port))])
     (port-count-lines! port)
-    (parse/imports lex! imports 'input-string)))
+    (parse/imports lex! #false imports 'input-string)))
 (define (parse-string str)
   (parse-string/imports str (hash)))
-(define (parse-port/imports port imports source-name)
+(define (parse-port/imports port mod-name imports source-name)
   (let* ([lex! (lambda () (lex port))])
-    (parse/imports lex! imports source-name)))
+    (parse/imports lex! mod-name imports source-name)))
 (module+ test
   (require rackunit)
 
