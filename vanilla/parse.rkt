@@ -132,7 +132,21 @@
   (struct Call Syntax (func args) #:transparent)
   (struct If Syntax (test consq alt) #:transparent)
 
-  )
+  (define (noloc ast)
+    (define r noloc)
+    (match ast
+      [(Program _ statements)  (Program #f (map r statements))]
+      [(Def _ var expr)  (Def #f (r var) (r expr))]
+
+      [(Lit _ value)  (Lit #f value)]
+      [(Quote _ ast)  (Quote #f (r ast))]
+      [(Local _ name number)  (Local #f name number)]
+      [(Global _ mod name)  (Global #f mod name)]
+      [(Unresolved _ name)  (Unresolved #f name)]
+
+      [(Func _ params body)  (Func #f (map r params) (map r body))]
+      [(Call _ func args)  (Call #f (r func) (map r args))]
+      [(If _ test consq alt)  (If #f (r test) (r consq) (r alt))])))
 (require 'ast)
 
 (define-syntax (pos stx)

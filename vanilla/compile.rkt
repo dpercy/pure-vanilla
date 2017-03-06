@@ -6,6 +6,7 @@
 (require syntax/srcloc)
 (require (submod "./parse.rkt" ast))
 (require (for-template "./runtime.rkt"))
+(require (for-template (only-in racket/require path-up)))
 
 
 (define (wrap-stx ast stx)
@@ -17,6 +18,25 @@
                      ; this includes a special mark read by Check Syntax.
                      #'())
       stx))
+
+(define (globals ast) ; -> setof noloc global
+  (define r globals)
+  (define U set-union)
+  (match ast
+    [(Global _ _ _) (set (noloc ast))]
+    [(Def _ var expr) (U (r var) (r expr))]
+
+    [(Program _ statements) (apply U (map r statements))]
+
+    [(Lit _ value) (set)]
+    [(Quote _ ast) (set)]
+    [(Unresolved _ name) (set)]
+
+    [(Local _ _ _) (set)]
+    [(Func _ params body) (r body)]
+
+    [(Call _ func args) (apply U (r func) (map r args))]
+    [(If _ t c a) (apply U (map r (list t c a)))]))
 
 (define (compile ast) ; -> syntax-object or list of syntax-object
   (wrap-stx
@@ -36,25 +56,24 @@
                                 #`(provide (rename-out [#,(compile-id v)
                                                         #,(Global-name v)])))
                               ; require
-                              (list
-                               (datum->syntax #f
-                                              (list #'require 'vanilla/runtime)))
-                              (list #`(provide (rename-out
-                                                #,@(for/list ([s statements]
-                                                              #:when (Def? s))
-                                                     (let ([v (Def-var s)])
-                                                       (list (compile-id v)
-                                                             (Global-name v))))))
-                                    )
-                              ; definitions and toplevel expressions
-                              (map compile statements)
-                              ; force all the definitions
+                              (list #`(require
+                                       (only-in racket/require path-up)
+                                       #,(datum->syntax #f 'vanilla/runtime)))
+                              (for*/list ([g (in-set (globals ast))]
+                                          [m (in-value (Global-mod g))]
+                                          #:when (and m (not (equal? m 'Base))))
+                                #`(require (rename-in
+                                            #,(list 'path-up (symbol->string m))
+                                            [#,(Global-name g) #,(compile-id g)])))
+                              ; definitions only
                               (for/list ([s statements]
-                                         #:when (Def? s)
-                                         [v (in-value (Def-var s))])
-                                #`(void #,(compile v))))]
-
-
+                                         #:when (Def? s))
+                                (compile s))
+                              ; force all the definitions, and run the expressions
+                              (for/list ([s statements])
+                                (match s
+                                  [(Def _ var expr) #`(void #,(compile var))]
+                                  [_ (compile s)])))]
 
      [(Lit _ value)  #`(quote #,value)]
      [(Quote _ ast)  #`(quote #,ast)]
@@ -78,10 +97,7 @@
     ; all generated identifiers have a dot.
     ; nice side effect: no conflict with Racket ids (quote, lambda, etc).
     [(Local _ name number)  (format-id #f "~a.~a" name number)]
-    ;;[(Global _ mod name)  (format-id #f "~a.~a" (or mod "") name)]
-    [(Global _ #f name)  (format-id #f ".~a" name)]
-    [(Global _ 'Base name)  (format-id #f "Base.~a" name)]
-    ))
+    [(Global _ mod name)  (format-id #f "~a.~a" (or mod "") name)]))
 
 (define (sl ast) ; strip loc from Local
   (match ast

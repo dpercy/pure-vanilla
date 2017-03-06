@@ -123,7 +123,6 @@
 (define Base.+ (Function + (Global #f 'Base '+)))
 (define Base.- (Function - (Global #f 'Base '-)))
 (define Base.< (Function < (Global #f 'Base '<)))
-(define Base.abs (Function abs (Global #f 'Base 'abs)))
 
 ; lists
 (define Base.list (Function list (Global #f 'Base 'list)))
@@ -132,18 +131,12 @@
 (define Base.first (Function first (Global #f 'Base 'first)))
 (define Base.rest (Function rest (Global #f 'Base 'rest)))
 ; - helpers
-(define Base.map (Function map (Global #f 'Base 'map)))
-(define Base.foldl (Function foldl-haskell-style (Global #f 'Base 'foldl)))
+;   TODO port to prelude
 (define Base.concat (Function (curry apply append) (Global #f 'Base 'concat)))
-(define Base.elem (Function
-                   (lambda (x lst)
-                     (not (false? (member x lst))))
-                   (Global #f 'Base 'elem)))
 
 ; strings
 (define Base.split (Function string-split (Global #f 'Base 'split)))
 (define Base.slice (Function substring (Global #f 'Base 'slice)))
-(define Base.replicate (Function make-list (Global #f 'Base 'replicate)))
 (define Base.parseInt (Function string->number (Global #f 'Base 'parseInt)))
 (define Base.strcat (Function string-append (Global #f 'Base 'strcat)))
 

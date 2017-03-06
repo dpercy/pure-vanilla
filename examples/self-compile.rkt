@@ -1,14 +1,6 @@
 #lang vanilla
 
 
-# testing
-assert = makeVariadic((args) ->
-                      let f = first(args) in
-                      let a = rest(args) in
-                      let v = apply(f, a) in
-                      if v then "ok" else error(strcat("assertion fail: ", show(f), show(a))))
-
-
 
 
 # syntax helper
@@ -29,6 +21,10 @@ assert(==, addBetween([1,2,3], 0), [1,0,2,0,3])
 
 commaSep = lst -> apply(strcat, addBetween(lst, ", "))
 
+# TODO open scope
+map = Prelude.map
+foldl = Prelude.foldl
+
 # simple js math compiler
 compile = expr ->
 if isFunc(expr) then compile(inspect(expr))
@@ -44,13 +40,13 @@ else cases(expr, [
                   [:Syntax.Call, (func, args) ->
                     cases(func, [
                       [:Syntax.Global, (mod, name) ->
-                        # TODO shouldn't x == :Base.+ work ??
-                        if [mod, name] == ["Base", "+"]
-                        then parens(apply(strcat, addBetween(map(compile, args), " + ")))
-                        else strcat(compile(func), parens(commaSep(map(compile, args))))
-                      ]
-                    ])]
-     ])
+                                       # TODO shouldn't x == :Base.+ work ??
+                                       if [mod, name] == ["Base", "+"]
+                                       then parens(apply(strcat, addBetween(map(compile, args), " + ")))
+                                       else strcat(compile(func), parens(commaSep(map(compile, args))))
+                                       ]
+                      ])]
+                  ])
 
 parens = s -> strcat("(", s, ")")
 
@@ -59,4 +55,3 @@ assert(==, compile(() -> 1), "(() => 1)")
 assert(==, compile((x, y) -> y), "((x_0, y_0) => y_0)")
 assert(==, compile(x -> x + 1), "((x_0) => (x_0 + 1))")
 # TODO more math operators
-
