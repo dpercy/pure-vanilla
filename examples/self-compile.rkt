@@ -1,7 +1,7 @@
 #lang vanilla
 
 
-
+assert = Prelude.assert
 
 # syntax helper
 cases = (v, handlers) ->
