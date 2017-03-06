@@ -1,4 +1,5 @@
 #lang vanilla
+
 # TODO implement actual parsing for boolean literals...
 true = 1 == 1
 false = 1 == 0

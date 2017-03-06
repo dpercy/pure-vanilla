@@ -26,6 +26,7 @@
                               (datum->syntax #f (list #'require 'vanilla/runtime))
                               (map compile statements))]
      ; TODO see ./macro-demos for how to do the correct evaluation order
+     ; (create a thunk or future per definition)
      [(Def _ var expr) #`(begin
                            (provide (rename-out [#,(compile var)
                                                  #,(Global-name var)]))
