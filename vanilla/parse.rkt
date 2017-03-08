@@ -111,26 +111,26 @@
 (module ast racket
   (provide (all-defined-out))
 
-  (struct Syntax (loc) #:transparent)
+  (struct Syntax (loc) #:prefab)
 
-  (struct Program Syntax (statements) #:transparent)
-  (struct Def Syntax (var expr) #:transparent)
+  (struct Program Syntax (statements) #:prefab)
+  (struct Def Syntax (var expr) #:prefab)
 
-  (struct Lit Syntax (value) #:transparent)
-  (struct Quote Syntax (ast) #:transparent)
+  (struct Lit Syntax (value) #:prefab)
+  (struct Quote Syntax (ast) #:prefab)
 
   ; `number` is not a De-Bruijn index or up-reference:
   ; it's an extension of the variable's name.
   ; Two locals are equal iff their `name` and `number` are equal.
-  (struct Local Syntax (name number) #:transparent)
-  (struct Global Syntax (mod name) #:transparent)
+  (struct Local Syntax (name number) #:prefab)
+  (struct Global Syntax (mod name) #:prefab)
   ; An Unresolved expression doesn't properly belong in an Expr.
   ; It should never be observable by the user program.
-  (struct Unresolved Syntax (name) #:transparent)
+  (struct Unresolved Syntax (name) #:prefab)
 
-  (struct Func Syntax (params body) #:transparent)
-  (struct Call Syntax (func args) #:transparent)
-  (struct If Syntax (test consq alt) #:transparent)
+  (struct Func Syntax (params body) #:prefab)
+  (struct Call Syntax (func args) #:prefab)
+  (struct If Syntax (test consq alt) #:prefab)
 
   (define (noloc ast)
     (define r noloc)
