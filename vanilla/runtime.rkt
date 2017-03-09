@@ -5,6 +5,19 @@
 (require (submod "parse.rkt" ast)
          "parse.rkt")
 
+(require racket/generic)
+
+(define-generics friendly-equal?
+  (friendly-equal-key friendly-equal?)
+  #:defaults ([Syntax? (define (friendly-equal-key v)
+                         (noloc v))]
+              [any/c (define (friendly-equal-key v)
+                       v)]))
+
+(define (friendly-equal? a b)
+  (equal? (friendly-equal-key a)
+          (friendly-equal-key b)))
+
 (struct Function (procedure syntax)
   ; TODO put a syntax-thunk here instead, to avoid constructing all the syntax nodes
   ; when they're not needed.
@@ -101,8 +114,10 @@
 
 ; generic
 (define Base.show (Function show (Global #f 'Base 'show)))
-(define Base.== (Function equal? (Global #f 'Base '==)))
-(define Base.!= (Function (compose not equal?) (Global #f 'Base '!=)))
+(define Base.== (Function friendly-equal? (Global #f 'Base '==)))
+(define Base.!= (Function (compose not friendly-equal?) (Global #f 'Base '!=)))
+(define Base.=== (Function equal? (Global #f 'Base '===)))
+(define Base.!== (Function (compose not equal?) (Global #f 'Base '!==)))
 (define Base.length (Function
                      (match-lambda
                        [(? string? s) (string-length s)]

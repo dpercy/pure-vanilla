@@ -8,6 +8,10 @@ assert = makeVariadic((args) ->
                       if v then "ok" else error(strcat("assertion fail: ", show(f), show(a))))
 # test that unqualified ids in Prelude resolve to Prelude ids
 assert(==, show(:assert), show(:Prelude.assert))
+# test that == works on the raw syntax objects
+assert(==, :assert, :Prelude.assert)
+# but === still distinguishes them
+assert(!==, :assert, :Prelude.assert)
 
 # TODO fix control flow on these
 # hacky non-short-circuiting boolean operators
