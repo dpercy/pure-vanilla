@@ -13,9 +13,23 @@
          show-syntax
          )
 
+(define (get-exports module-name)
+  ; load the module but don't execute its run-time code
+  (dynamic-require module-name (void))
+  (define-values {variables syntax} (module->exports module-name))
+  ; variables is an alist mapping phase-numbers to "exports":
+  ; each "export" is a list whose head is a symbol.
+  (map first (rest (assoc 0 variables))))
+
+(define (find-up dir name)
+  (let ([dir (normalize-path dir)])
+    (let ([f (build-path dir name)])
+      (if (file-exists? f)
+          f
+          (find-up (build-path dir 'up) name)))))
 
 (define-tokens nonempty-tokens (Literal Identifier Operator))
-(define-empty-tokens empty-tokens (EOF Colon Equals Newline OpenParen CloseParen OpenBracket CloseBracket Arrow Comma If Then Else Let In))
+(define-empty-tokens empty-tokens (EOF Colon Equals Newline OpenParen CloseParen OpenBracket CloseBracket Arrow Comma If Then Else Let In Using))
 
 (define-lex-abbrev digit (char-range #\0 #\9))
 (define-lex-abbrev letter (union (char-range #\a #\z)
@@ -77,6 +91,7 @@
             ["else" (token-Else)]
             ["let"  (token-Let)]
             ["in"   (token-In)]
+            ["using" (token-Using)]
             [_
              (token-Identifier (Unresolved #f (string->symbol lexeme)))])]
 
@@ -114,6 +129,7 @@
   (struct Syntax (loc) #:prefab)
 
   (struct Program Syntax (statements) #:prefab)
+  (struct Using Syntax (mod) #:prefab)
   (struct Def Syntax (var expr) #:prefab)
 
   (struct Lit Syntax (value) #:prefab)
@@ -190,7 +206,11 @@
     (Statements [() (list)]
                 [(Statement) (list $1)]
                 [(Statement Newline Statements) (cons $1 $3)])
-    (Statement [(Definition) $1] [(Expr) $1])
+    (Statement [(Definition) $1]
+               [(Expr) $1]
+               [(Using Iden) (Using (pos) (match $2
+                                            [(Unresolved _ name) name]
+                                            [v (error "bad module name: ~v" v)]))])
     (Definition
       [(Iden Equals Expr) (Def (pos) $1 $3)]
       [(OpenParen Op CloseParen Equals Expr) (Def (pos) $2 $5)]
@@ -245,7 +265,8 @@
 (define (parse/imports lex! mod-name imports source-name)
   (fix-scope-program ((pre-parse source-name) lex!)
                      mod-name
-                     (invert-hash-of-sets imports)))
+                     (invert-hash-of-sets imports)
+                     source-name))
 
 (define (invert-hash-of-sets h)
   (for*/fold ([result (hash)]) ([{k s} (in-hash h)]
@@ -266,27 +287,46 @@
       #false))
 
 ; imports-rev : hash( unqual-id-name -> set( module-name ) )
-(define (fix-scope-program program mod-name imports-rev)
+(define (fix-scope-program program mod-name imports-rev source-name)
   (match program
     [(Program loc statements)
      ; local-env : name -> number, the max of in-scope locals
      (define local-env (hash))
+     ; extend the imports with any Using statements
      (define imports-rev*
-       (for/fold ([imports-rev imports-rev]) ([stmt statements])
+       (for/fold ([imports-rev imports-rev]) ([stmt statements]
+                                              #:when (Using? stmt))
          (match stmt
-           [(Def _ (Unresolved _ name) _) (hash-set imports-rev name (set mod-name))]
-           [_ imports-rev])))
+           [(Using _ mod)
+            (define-values {source-dir _0 _1} (split-path source-name))
+            (define using-mod (find-up source-dir (symbol->string mod)))
+            (define exports (get-exports using-mod))
+            (for/fold ([imports-rev imports-rev])
+                      ([name exports])
+              (hash-set imports-rev
+                        name
+                        (set-add (hash-ref imports-rev
+                                           name
+                                           (set))
+                                 mod)))])))
+     ; block/shadow imports that match a Def
+     (define imports-rev**
+       (for/fold ([imports-rev imports-rev*]) ([stmt statements]
+                                               #:when (Def? stmt))
+         (match stmt
+           [(Def _ (Unresolved _ name) _) (hash-set imports-rev name (set mod-name))])))
      (Program loc
-              (for/list ([stmt statements])
-                (fix-scope-statement stmt mod-name imports-rev* local-env)))]))
-(define (fix-scope-statement stmt mod-name imports-rev local-env)
+              (for/list ([stmt statements]
+                         #:when (not (Using? stmt)))
+                (fix-scope-statement stmt imports-rev** local-env)))]))
+(define (fix-scope-statement stmt imports-rev local-env)
   (match stmt
     [(Def loc var expr) (Def loc
-                          (fix-scope-expr var mod-name imports-rev local-env)
-                          (fix-scope-expr expr mod-name imports-rev local-env))]
-    [expr (fix-scope-expr expr mod-name imports-rev local-env)]))
-(define (fix-scope-expr expr mod-name imports-rev local-env)
-  (define (recur expr) (fix-scope-expr expr mod-name imports-rev local-env))
+                          (fix-scope-expr var imports-rev local-env)
+                          (fix-scope-expr expr imports-rev local-env))]
+    [expr (fix-scope-expr expr imports-rev local-env)]))
+(define (fix-scope-expr expr imports-rev local-env)
+  (define (recur expr) (fix-scope-expr expr imports-rev local-env))
   (match expr
     [(Local _ name number)  expr]
     [(Global _ mod name)  expr]
@@ -328,8 +368,8 @@
                             (hash-set local-env name num)]))])
        (Func loc
              (for/list ([p params])
-               (fix-scope-expr p mod-name imports-rev local-env*))
-             (fix-scope-expr body mod-name imports-rev local-env*)))]
+               (fix-scope-expr p imports-rev local-env*))
+             (fix-scope-expr body imports-rev local-env*)))]
     [(Call loc func args)  (Call loc
                                  (recur func)
                                  (map recur args))]

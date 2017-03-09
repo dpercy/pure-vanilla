@@ -56,10 +56,11 @@
                                          [v (in-value (Def-var s))])
                                 #`(provide (rename-out [#,(compile-id v)
                                                         #,(Global-name v)])))
-                              ; require
+                              ; require runtime stuff
                               (list #`(require
                                        (only-in racket/require path-up)
                                        #,(datum->syntax #f 'vanilla/runtime)))
+                              ; require modules referenced in Globals
                               (for*/list ([g (in-set (globals ast))]
                                           [m (in-value (Global-mod g))]
                                           #:when (not (member m
