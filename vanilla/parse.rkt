@@ -61,8 +61,10 @@
 
    [nat  (token-Literal (string->number lexeme))]
    [(concatenation #\"
-                   (repetition 0 +inf.0 (char-complement (union #\\
-                                                                #\")))
+                   (repetition 0 +inf.0 (union (char-complement (union #\\
+                                                                       #\"))
+                                               "\\\"" ; \"
+                                               ))
                    #\")
     ; TODO escapes
     (token-Literal (read (open-input-string lexeme)))]
@@ -248,7 +250,9 @@
           [(Colon OpenParen Expr CloseParen) (Quote (pos) $3)]
 
           ; paren nest
-          [(OpenParen Expr CloseParen) $2])
+          [(OpenParen MaybeNewline Expr MaybeNewline CloseParen) $3])
+    (MaybeNewline [() (void)]
+                  [(Newline) (void)])
     (Params [() (list)]
             [(Param) (list $1)]
             [(Param Comma Args) (cons $1 $3)])
