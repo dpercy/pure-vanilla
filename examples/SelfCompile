@@ -23,25 +23,36 @@ assert(==, addBetween([1,2,3], 0), [1,0,2,0,3])
 commaSep = lst -> apply(strcat, addBetween(lst, ", "))
 
 # simple js math compiler
-compile = expr ->
-if isFunc(expr) then compile(inspect(expr))
-else cases(expr, [
+compile = expr -> cases(expr, [
+  [:Lit, compileValue],
+  [:Quote, compileValue],
+  [:Local, (name, num) -> strcat(name, "_", show(num))],
+  [:Global, (mod, name) -> strcat(mod, "[", compile(pack(:Lit, name)), "]")],
   [:Func, (params, body) ->
                    parens(
                      strcat(parens(commaSep(map(compile, params))),
                             " => ",
                             compile(body)))],
-  [:Local, (name, num) -> strcat(name, "_", show(num))],
-  [:Lit, show],
-  [:Global, (mod, name) -> strcat(mod, "[", compile(pack(:Lit, name)), "]")],
   [:Call, (func, args) ->
                    strcat("(1,", compile(func), ")(", commaSep(map(compile, args)), ")")],
+  [:If, (t, c, a) -> strcat("(", compile(t), ")?(", compile(c), "):(", compile(a), ")")],
 ])
+
+compileValue = expr ->
+if isFunc(expr) then compile(inspect(expr))
+else if not(isSyntax(expr)) then show(expr)
+else cases(expr, [
+  # TODO need to access source loc here
+  [:Lit, (v) -> error("TODO return a string that JS-evaluates to a tree representing a Lit expression")],
+])
+
 
 parens = s -> strcat("(", s, ")")
 
-assert(==, compile(x -> x), "((x_0) => x_0)")
-assert(==, compile(() -> 1), "(() => 1)")
-assert(==, compile((x, y) -> y), "((x_0, y_0) => y_0)")
-assert(==, compile(x -> x + 1), "((x_0) => (1,Base[\"+\"])(x_0, 1))")
-# TODO more math operators
+# TODO need to enforce arity errors
+assert(==, compileValue(x -> x), "((x_0) => x_0)")
+assert(==, compileValue(() -> 1), "(() => 1)")
+assert(==, compileValue((x, y) -> y), "((x_0, y_0) => y_0)")
+assert(==, compileValue(x -> x + 1), "((x_0) => (1,Base[\"+\"])(x_0, 1))")
+# TODO conditionals should error if test isn't boolean
+assert(==, compileValue(() -> if 1 then 2 else 3 + 4), "(() => (1)?(2):((1,Base[\"+\"])(3, 4)))")

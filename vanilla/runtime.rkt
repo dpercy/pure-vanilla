@@ -100,7 +100,7 @@
        [(Unresolved _ name) (t 'Unresolved (symbol->string name))]
        [(Func _ params body) (t 'Func params body)]
        [(Call _ func args) (t 'Call func args)]
-       [(If _ t c a) (t 'If t c a)])]
+       [(If _ test consq alt) (t 'If test consq alt)])]
     [_ (error 'as-tagged "can't be expressed as a tagged value: ~v" v)]))
 
 (define (make-variadic f)
@@ -133,6 +133,7 @@
 (define Base.pack (Function pack (Global #f 'Base 'pack)))
 (define Base.unpack (Function unpack (Global #f 'Base 'unpack)))
 (define Base.inspect (Function Function-syntax (Global #f 'Base 'inspect)))
+(define Base.isSyntax (Function Syntax? (Global #f 'Base 'isSyntax)))
 
 ; numbers
 (define Base.+ (Function + (Global #f 'Base '+)))
