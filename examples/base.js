@@ -30,10 +30,25 @@ Base.error = Base.arity(exn => { throw Error(exn); });
 Base["true"] = true;
 Base["false"] = false;
 __ormap = (arr, pred) => arr.every(v => pred(v));
+Base.bool = v => {
+    if (typeof v === "boolean") return v;
+    Base.error("if: expected a boolean but got " + Base.show(v));
+};
 
 
 // numbers / rationals
+Base.num = bigRat;
 Base.isNumber = Base.arity(v => bigRat().constructor === v.constructor);
+Base.numerator = Base.arity(v => {
+    if (!Base.isNumber(v))
+        Base.error("numerator non-number");
+    return bigRat(v.num);
+});
+Base.denominator = Base.arity(v => {
+    if (!Base.isNumber(v))
+        Base.error("denominator non-number");
+    return bigRat(v.denom);
+});
 Base["+"] = (...args) => {
     if (!__ormap(args, Base.isNumber))
         Base.error("plus non-number");
@@ -50,6 +65,11 @@ Base["<"] = Base.arity((x, y) => {
     if (!__ormap([x, y], Base.isNumber))
         Base.error("less-than non-number");
     return x.lesser(y);
+});
+Base["/"] = Base.arity((x, y) => {
+    if (!__ormap([x, y], Base.isNumber))
+        Base.error("less-than non-number");
+    return x.divide(y);
 });
 
 
@@ -167,8 +187,16 @@ Base.makeVariadic = Base.arity(func => {
     };
 });
 Base.show = Base.arity(v => {
-    // TODO fix this
-    return "" + v;
+    if (Base.isNumber(v)) {
+        if (v.denom.eq(1)) {
+            return v.num.toString();
+        } else {
+            return v.toString();
+        }
+    } else {
+        // TODO fix this
+        return "" + v;
+    }
 });
 
                                

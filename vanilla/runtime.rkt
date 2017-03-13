@@ -138,8 +138,11 @@
 
 ; numbers
 (define Base.isNumber (Function number? (Global #f 'Base 'isNumber)))
+(define Base.numerator (Function numerator (Global #f 'Base 'numerator)))
+(define Base.denominator (Function denominator (Global #f 'Base 'denominator)))
 (define Base.+ (Function + (Global #f 'Base '+)))
 (define Base.- (Function - (Global #f 'Base '-)))
+(define Base./ (Function / (Global #f 'Base '/)))
 (define Base.< (Function < (Global #f 'Base '<)))
 
 ; lists

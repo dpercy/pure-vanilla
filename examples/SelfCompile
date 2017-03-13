@@ -35,11 +35,19 @@ compile = expr -> cases(expr, [
                             compile(body)))],
   [:Call, (func, args) ->
                    strcat("(1,", compile(func), ")(", commaSep(map(compile, args)), ")")],
-  [:If, (t, c, a) -> strcat("(", compile(t), ")?(", compile(c), "):(", compile(a), ")")],
+  [:If, (t, c, a) ->
+          let test = compile(t) in
+          let test = strcat("Base.bool(", test, ")") in
+          strcat("(", test, ")?(", compile(c), "):(", compile(a), ")")],
 ])
 
 compileValue = expr ->
 if isFunc(expr) then compile(inspect(expr))
+else if isNumber(expr) then (
+  if denominator(expr) == 1 then strcat("Base.num(", show(expr), ")")
+  else strcat("Base.num(",
+              show(numerator(expr)), ", ",
+              show(denominator(expr)), ")"))
 else if not(isSyntax(expr)) then show(expr)
 else cases(expr, [
   # TODO need to access source loc here
@@ -49,10 +57,10 @@ else cases(expr, [
 
 parens = s -> strcat("(", s, ")")
 
-# TODO need to enforce arity errors
 assert(==, compileValue(x -> x), "((x_0) => x_0)")
-assert(==, compileValue(() -> 1), "(() => 1)")
+assert(==, compileValue(() -> 1), "(() => Base.num(1))")
 assert(==, compileValue((x, y) -> y), "((x_0, y_0) => y_0)")
-assert(==, compileValue(x -> x + 1), "((x_0) => (1,Base[\"+\"])(x_0, 1))")
-# TODO conditionals should error if test isn't boolean
-assert(==, compileValue(() -> if 1 then 2 else 3 + 4), "(() => (1)?(2):((1,Base[\"+\"])(3, 4)))")
+assert(==, compileValue(x -> x + 1), "((x_0) => (1,Base[\"+\"])(x_0, Base.num(1)))")
+assert(==, compileValue(() -> if 1 then 2 else 3 + 4),
+           "(() => (Base.bool(Base.num(1)))?(Base.num(2)):((1,Base[\"+\"])(Base.num(3), Base.num(4))))")
+assert(==, compileValue(3/4), "Base.num(3, 4)")
