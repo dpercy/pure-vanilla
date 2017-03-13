@@ -1,0 +1,39 @@
+#lang vanilla
+
+
+# TODO Must symbols always refer to a definition?
+# - currently: symbol can be any string,string pair, but
+#              definitions need to exist to refer to them using a Using statement.
+# If symbols can only be abbreviated when they refer to a definition,
+# maybe symbols should only be valid when they refer to a definition.
+# Or, maybe there are actually 2 different kinds of values here:
+#  - quoted-variables, which are a special case of quoted-syntax, and have srcloc.
+#  - symbolic names, which are just qualified names
+#    - but, "qualified" means "qualified by a module name" so this still refers to a def?
+#    - maybe symbols are just the name part, without the qualification?
+
+
+# IMPORTANT: Symbols are capabilities:
+#  - used as keys for pack/unpack
+#  - used as keys for effects and handlers
+#  - must be possible to avoid exporting a key!
+#    - I guess reflection can always access this; maybe that's only allowed at compile time.
+#    - Maybe I need to take Python's "consenting adults" viewpoint.
+#      (Even Java reflection is like this.)
+
+
+Program = :Program
+Using = :Using
+Def = :Def
+
+Lit = :Lit
+Quote = :Quote
+
+Local = :Local
+Global = :Global
+
+Unresolved = :Unresolved
+
+Func = :Func
+Call = :Call
+If = :If

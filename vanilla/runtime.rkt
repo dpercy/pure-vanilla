@@ -109,7 +109,7 @@
   (lambda args (f args)))
 
 
-;errors
+; errors
 (define Base.error (Function error (Global #f 'Base 'error)))
 
 ; generic
@@ -126,6 +126,7 @@
 (define Base.apply (Function apply (Global #f 'Base 'apply)))
 (define Base.makeVariadic (Function make-variadic (Global #f 'Base 'makeVariadic)))
 
+; booleans
 (define Base.true #true)
 (define Base.false #false)
 
@@ -136,6 +137,7 @@
 (define Base.isSyntax (Function Syntax? (Global #f 'Base 'isSyntax)))
 
 ; numbers
+(define Base.isNumber (Function number? (Global #f 'Base 'isNumber)))
 (define Base.+ (Function + (Global #f 'Base '+)))
 (define Base.- (Function - (Global #f 'Base '-)))
 (define Base.< (Function < (Global #f 'Base '<)))
@@ -143,14 +145,15 @@
 ; lists
 (define Base.list (Function list (Global #f 'Base 'list)))
 (define Base.isEmpty (Function empty? (Global #f 'Base 'isEmpty)))
+(define Base.isPair (Function cons? (Global #f 'Base 'isPair)))
 (define Base.cons (Function cons (Global #f 'Base 'cons)))
 (define Base.first (Function first (Global #f 'Base 'first)))
 (define Base.rest (Function rest (Global #f 'Base 'rest)))
 ; - helpers
 ;   TODO port to prelude
-(define Base.concat (Function (curry apply append) (Global #f 'Base 'concat)))
 
 ; strings
+(define Base.isString (Function string? (Global #f 'Base 'isString)))
 (define Base.split (Function string-split (Global #f 'Base 'split)))
 (define Base.slice (Function substring (Global #f 'Base 'slice)))
 (define Base.parseInt (Function string->number (Global #f 'Base 'parseInt)))
