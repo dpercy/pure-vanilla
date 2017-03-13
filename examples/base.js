@@ -38,7 +38,7 @@ Base.bool = v => {
 
 // numbers / rationals
 Base.num = bigRat;
-Base.isNumber = Base.arity(v => bigRat().constructor === v.constructor);
+Base.isNumber = Base.arity(v => v instanceof bigRat().constructor);
 Base.numerator = Base.arity(v => {
     if (!Base.isNumber(v))
         Base.error("numerator non-number");
@@ -79,7 +79,7 @@ Base.Pair = function(first, rest) {
     this.first = first;
     this.rest = rest;
 };
-Base.isPair = Base.arity(v => v.constructor === Base.Pair);
+Base.isPair = Base.arity(v => v instanceof Base.Pair);
 Base.cons = Base.arity((hd, tl) => new Base.Pair(hd, tl));
 Base.first = Base.arity(v => {
     if (!Base.isPair(v))
@@ -187,15 +187,31 @@ Base.makeVariadic = Base.arity(func => {
     };
 });
 Base.show = Base.arity(v => {
+    if (v === true) return "true";
+    if (v === false) return "false";
+    if (v === null) return "[]";
+    
     if (Base.isNumber(v)) {
         if (v.denom.eq(1)) {
             return v.num.toString();
         } else {
             return v.toString();
         }
+    } else if (Base.isPair(v)) {
+        var s = "[" + Base.show(v.first);
+        v = v.rest;
+        while (Base.isPair(v)) {
+            s += ", " + Base.show(v.first);
+            v = v.rest;
+        }
+        return s + "]";
+    } else if (Base.isString(v)) {
+        return JSON.stringify(v);
+    } else if (Base.isFunc(v)) {
+        // TODO use syntax instead
+        return "#<function:" + v.name + ">";
     } else {
-        // TODO fix this
-        return "" + v;
+        return "#<js:" + v + ">";
     }
 });
 
