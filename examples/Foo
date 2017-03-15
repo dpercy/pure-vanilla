@@ -1,0 +1,8 @@
+#lang vanilla
+
+## show(getSiblings(:Base.+)) ## TODO fix this
+
+"siblings"
+show(getSiblings(:Prelude.map))
+"value"
+show(getValue(:Prelude.map))

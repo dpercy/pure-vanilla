@@ -108,6 +108,33 @@
   ; return a function that takes N args
   (lambda args (f args)))
 
+(define (get-siblings sym) ; list of ids
+  (match sym
+    [(Global _ mod _)
+     ; TODO fix how module names work:
+     ;  everything should be absolute within the "project" tree, like Java.
+     (define module-name (symbol->string mod))
+     ; load the module but don't execute its run-time code
+     (dynamic-require module-name (void))
+     (define-values {variables syntax} (module->exports module-name))
+     ; variables is an alist mapping phase-numbers to "exports":
+     ; each "export" is a list whose head is a symbol.
+     (define exported-names (map first (rest (assoc 0 variables))))
+     (for/list ([name exported-names])
+       ; TODO include srcloc?
+       (Global #f mod name))]
+    [_ (error 'get-siblings "expected a Global")]))
+
+(define (get-value sym) ; value
+  (match sym
+    [(Global _ mod name)
+     ; TODO fix how module names work:
+     ;  everything should be absolute within the "project" tree, like Java.
+     (define module-name (symbol->string mod))
+     ; load the module but don't execute its run-time code
+     (dynamic-require module-name name)]
+    [_ (error 'get-value "expected a Global")]))
+
 
 ; errors
 (define Base.error (Function error (Global #f 'Base 'error)))
@@ -135,6 +162,8 @@
 (define Base.unpack (Function unpack (Global #f 'Base 'unpack)))
 (define Base.inspect (Function Function-syntax (Global #f 'Base 'inspect)))
 (define Base.isSyntax (Function Syntax? (Global #f 'Base 'isSyntax)))
+(define Base.getSiblings (Function get-siblings (Global #f 'Base 'getSiblings)))
+(define Base.getValue (Function get-value (Global #f 'Base 'getValue)))
 
 ; numbers
 (define Base.isNumber (Function number? (Global #f 'Base 'isNumber)))
