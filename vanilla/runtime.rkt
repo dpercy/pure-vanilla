@@ -111,7 +111,6 @@
 (define (get-siblings sym) ; list of ids
   (match sym
     [(Global _ mod _)
-     ; TODO fix how module names work:
      ;  everything should be absolute within the "project" tree, like Java.
      (define module-name (symbol->string mod))
      ; load the module but don't execute its run-time code
@@ -128,7 +127,6 @@
 (define (get-value sym) ; value
   (match sym
     [(Global _ mod name)
-     ; TODO fix how module names work:
      ;  everything should be absolute within the "project" tree, like Java.
      (define module-name (symbol->string mod))
      ; load the module but don't execute its run-time code
