@@ -11,12 +11,18 @@
   (friendly-equal-key friendly-equal?)
   #:defaults ([Syntax? (define (friendly-equal-key v)
                          (noloc v))]
+              [cons?
+               (define/generic recur friendly-equal-key)
+               (define (friendly-equal-key p)
+                 (cons (recur (car p))
+                       (recur (cdr p))))]
               [any/c (define (friendly-equal-key v)
                        v)]))
 
 (define (friendly-equal? a b)
-  (equal? (friendly-equal-key a)
-          (friendly-equal-key b)))
+  (or (eq? a b)
+      (equal? (friendly-equal-key a)
+              (friendly-equal-key b))))
 
 (struct Function (procedure syntax)
   ; TODO put a syntax-thunk here instead, to avoid constructing all the syntax nodes
@@ -30,6 +36,8 @@
     [(? Syntax? ast) (Quote #f ast)]
     [(? list?) (Call #f (Global #f 'Base 'list)
                      (map value->syntax v))]
+    [#true  (Global #f 'Base 'true)]
+    [#false  (Global #f 'Base 'false)]
     [v (Lit #f v)]))
 
 
@@ -68,7 +76,7 @@
 
 (define (pack sym . args)
   (match sym
-    [(Global _ m n) (tagged (Global #f m n) args)]))
+    [(Global _ m n) (from-tagged (tagged (Global #f m n) args))]))
 
 (define (unpack sym v)
   (match sym
@@ -96,17 +104,41 @@
        [(Lit _ value) (t 'Lit value)]
        [(Quote _ ast) (t 'Quote ast)]
        [(Local _ name num) (t 'Local (symbol->string name) num)]
-       [(Global _ mod name) (t 'Global (symbol->string mod) (symbol->string name))]
+       [(Global _ mod name) (t 'Global (and mod (symbol->string mod)) (symbol->string name))]
        [(Unresolved _ name) (t 'Unresolved (symbol->string name))]
        [(Func _ params body) (t 'Func params body)]
        [(Call _ func args) (t 'Call func args)]
        [(If _ test consq alt) (t 'If test consq alt)])]
     [_ (error 'as-tagged "can't be expressed as a tagged value: ~v" v)]))
+(define (from-tagged v)
+  (match v
+    [(tagged (Global _ 'Syntax 'Local) (list name num))
+     (Local #f (string->symbol name) num)]
+    [(tagged (Global _ 'Syntax 'Global) (list mod name))
+     (Global #f (string->symbol mod) (string->symbol name))]
+    [(tagged (Global _ 'Syntax 'Unresolved) (list name))
+     (Unresolved #f (string->symbol name))]
+    [(tagged (Global _ 'Syntax name) vs)
+     (define C (match name
+                 ['Program Program]
+                 ['Def Def]
+                 ['Lit Lit]
+                 ['Quote Quote]
+                 ['Local Local]
+                 ['Global Global]
+                 ['Unresolved Unresolved]
+                 ['Func Func]
+                 ['Call Call]
+                 ['If If]))
+     (apply C #f vs)]
+    [_ v]))
 
 (define (make-variadic f)
-  ; f takes a list
-  ; return a function that takes N args
-  (lambda args (f args)))
+  (match f
+    [(Function proc stx)
+     (Function (lambda args (proc args))
+               (Call #f (Global #f 'Base 'makeVariadic)
+                     (list stx)))]))
 
 (define (get-siblings sym) ; list of ids
   (match sym
@@ -143,6 +175,10 @@
 (define Base.!= (Function (compose not friendly-equal?) (Global #f 'Base '!=)))
 (define Base.=== (Function equal? (Global #f 'Base '===)))
 (define Base.!== (Function (compose not equal?) (Global #f 'Base '!==)))
+; TODO rename to strlen??
+; - separate "length" functions per type is annoying
+; - merging them puts list length logic into core,
+;   or requires overloading / dynamic dispatch / generics.
 (define Base.length (Function
                      (match-lambda
                        [(? string? s) (string-length s)]
@@ -155,14 +191,6 @@
 (define Base.true #true)
 (define Base.false #false)
 
-; syntax
-(define Base.pack (Function pack (Global #f 'Base 'pack)))
-(define Base.unpack (Function unpack (Global #f 'Base 'unpack)))
-(define Base.inspect (Function Function-syntax (Global #f 'Base 'inspect)))
-(define Base.isSyntax (Function Syntax? (Global #f 'Base 'isSyntax)))
-(define Base.getSiblings (Function get-siblings (Global #f 'Base 'getSiblings)))
-(define Base.getValue (Function get-value (Global #f 'Base 'getValue)))
-
 ; numbers
 (define Base.isNumber (Function number? (Global #f 'Base 'isNumber)))
 (define Base.numerator (Function numerator (Global #f 'Base 'numerator)))
@@ -171,6 +199,14 @@
 (define Base.- (Function - (Global #f 'Base '-)))
 (define Base./ (Function / (Global #f 'Base '/)))
 (define Base.< (Function < (Global #f 'Base '<)))
+
+; strings
+(define Base.isString (Function string? (Global #f 'Base 'isString)))
+; TODO move split to prelude
+(define Base.split (Function string-split (Global #f 'Base 'split)))
+(define Base.slice (Function substring (Global #f 'Base 'slice)))
+(define Base.parseInt (Function string->number (Global #f 'Base 'parseInt)))
+(define Base.strcat (Function string-append (Global #f 'Base 'strcat)))
 
 ; lists
 (define Base.list (Function list (Global #f 'Base 'list)))
@@ -182,12 +218,13 @@
 ; - helpers
 ;   TODO port to prelude
 
-; strings
-(define Base.isString (Function string? (Global #f 'Base 'isString)))
-(define Base.split (Function string-split (Global #f 'Base 'split)))
-(define Base.slice (Function substring (Global #f 'Base 'slice)))
-(define Base.parseInt (Function string->number (Global #f 'Base 'parseInt)))
-(define Base.strcat (Function string-append (Global #f 'Base 'strcat)))
-
 ; functions
 (define Base.isFunc (Function procedure? (Global #f 'Base 'isFunc)))
+
+; syntax
+(define Base.pack (Function pack (Global #f 'Base 'pack)))
+(define Base.unpack (Function unpack (Global #f 'Base 'unpack)))
+(define Base.inspect (Function Function-syntax (Global #f 'Base 'inspect)))
+(define Base.isSyntax (Function Syntax? (Global #f 'Base 'isSyntax)))
+(define Base.getSiblings (Function get-siblings (Global #f 'Base 'getSiblings)))
+(define Base.getValue (Function get-value (Global #f 'Base 'getValue)))

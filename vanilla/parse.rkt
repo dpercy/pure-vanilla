@@ -36,7 +36,7 @@
                                  (char-range #\A #\Z)))
 
 (define-lex-abbrev iden (concatenation letter
-                                       (repetition 0 +inf.0 (union letter digit))))
+                                       (repetition 0 +inf.0 (union letter digit "_"))))
 (define-lex-abbrev op (repetition 1 +inf.0 (char-set "~!@$%^&*-+=<>/?|\\")))
 
 (define-lex-abbrev nat (repetition 1 +inf.0 digit))
@@ -162,7 +162,7 @@
       [(Global _ mod name)  (Global #f mod name)]
       [(Unresolved _ name)  (Unresolved #f name)]
 
-      [(Func _ params body)  (Func #f (map r params) (map r body))]
+      [(Func _ params body)  (Func #f (map r params) (r body))]
       [(Call _ func args)  (Call #f (r func) (map r args))]
       [(If _ test consq alt)  (If #f (r test) (r consq) (r alt))])))
 (require 'ast)
@@ -262,7 +262,7 @@
           [(N Expr N) (list $2)] ; base case with no trailing comma
           [(N Expr Comma Args) (cons $2 $4)]
           ; op cases
-          [(N Op N) (list $1)]
+          [(N Op N) (list $2)]
           [(N Op Comma Args) (cons $2 $4)]
           ))))
 
@@ -338,7 +338,6 @@
     [(Lit _ value)  expr]
     [(Quote loc ast)  (Quote loc (recur ast))]
     [(Unresolved loc name)
-     ; 1. check local-env -> make a local
      (match (hash-ref local-env name #f)
        [(? number? n)  (Local loc name n)]
        [#false

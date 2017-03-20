@@ -1,12 +1,7 @@
 #lang vanilla
 # http://adventofcode.com/2016/day/1
 
-map = Prelude.map
-abs = Prelude.abs
-foldl = Prelude.foldl
-replicate = Prelude.replicate
-elem = Prelude.elem
-assert = Prelude.assert
+using Prelude
 
 main = (input) ->
   let inp = parse(input) in
