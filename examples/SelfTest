@@ -4,6 +4,7 @@ using Prelude
 using Syntax
 
 example = "this string is an example"
+hungry = makeVariadic(args -> hungry)
 
 
 # equality on atomic types

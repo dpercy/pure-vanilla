@@ -162,7 +162,7 @@
      ;  everything should be absolute within the "project" tree, like Java.
      (define module-name (symbol->string mod))
      ; load the module but don't execute its run-time code
-     (dynamic-require module-name name)]
+     (force (dynamic-require module-name name))]
     [_ (error 'get-value "expected a Global")]))
 
 

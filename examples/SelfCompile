@@ -41,19 +41,19 @@ compile = expr -> cases(expr, [
           strcat("(", test, ")?(", compile(c), "):(", compile(a), ")")],
 ])
 
-compileValue = expr ->
+compileValue = expr ->  # TODO rename to value
 if isFunc(expr) then compile(inspect(expr))
 else if isNumber(expr) then (
   if denominator(expr) == 1 then strcat("Base.num(", show(expr), ")")
   else strcat("Base.num(",
               show(numerator(expr)), ", ",
               show(denominator(expr)), ")"))
+else if	isEmpty(expr) then "Base.list()"
+else if isPair(expr) then strcat("Base.list(",
+                                 commaSep(map(compileValue, expr)),
+                                 ")")
 else if not(isSyntax(expr)) then show(expr)
-else cases(expr, [
-  # TODO need to access source loc here
-  [:Lit, (v) -> error("TODO return a string that JS-evaluates to a tree representing a Lit expression")],
-])
-
+else "Base.error('syntax in JS land not supported yet')"
 
 parens = s -> strcat("(", s, ")")
 
@@ -64,3 +64,14 @@ assert(==, compileValue(x -> x + 1), "((x_0) => (1,Base[\"+\"])(x_0, Base.num(1)
 assert(==, compileValue(() -> if 1 then 2 else 3 + 4),
            "(() => (Base.bool(Base.num(1)))?(Base.num(2)):((1,Base[\"+\"])(Base.num(3), Base.num(4))))")
 assert(==, compileValue(3/4), "Base.num(3, 4)")
+
+
+compileModule = sym ->
+  let syms = getSiblings(sym) in
+  let mod = first(unpack(:Global, sym)) in
+  strcat("var ", mod, " = {};\n",
+         apply(strcat, map(compileDef, syms)))
+
+compileDef = sym ->
+  let v = getValue(sym) in
+  strcat("var ", compile(sym), " = ", compileValue(v), ";\n")

@@ -63,8 +63,8 @@
    [(concatenation #\"
                    (repetition 0 +inf.0 (union (char-complement (union #\\
                                                                        #\"))
-                                               "\\\"" ; \"
-                                               ))
+                                               (concatenation "\\"
+                                                              (char-set "tn\"\\"))))
                    #\")
     ; TODO escapes
     (token-Literal (read (open-input-string lexeme)))]
