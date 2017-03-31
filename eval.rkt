@@ -25,8 +25,12 @@ Limitations of this simple evaluator:
     `(let ([get-global
             (quote ,(lambda (mn name)
                       (hash-ref (Mod-values
-                                 (hash-ref modstore mn))
-                                name)))]
+                                 (hash-ref modstore mn
+                                           (lambda ()
+                                             (error 'eval "no such module: ~a" mn))))
+                                name
+                                (lambda ()
+                                  (error 'eval "module ~a doesn't define ~a" mn name)))))]
            [set-global!
             (quote ,(lambda (mn name value)
                       (match-define (Mod _ values)
