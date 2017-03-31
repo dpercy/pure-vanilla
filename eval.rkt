@@ -39,6 +39,7 @@ Limitations of this simple evaluator:
                       (hash-set! modstore mn
                                  (Mod name (hash-set values name value)))))])
        ,core-expr))
+  (displayln (list 'compiled core-expr))
   (racket:eval (datum->syntax #'() wrapped-expr)))
 
 (define (compile expr)

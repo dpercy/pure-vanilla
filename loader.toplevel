@@ -1,0 +1,40 @@
+(module Util
+    #;()
+  (= map
+     (lambda (f lst)
+       (if (Builtin.isEmpty lst)
+           '()
+           (Builtin.link (f (Builtin.first lst))
+                         (map f (Builtin.rest lst)))))))
+
+(module Loader
+    #;()
+
+  (= runModule
+     (lambda (modname) ; as a string
+       ; interpret modname as a filename
+       (let* ([text (System.readFile modname)]
+              [_ (Builtin.debug "one")]
+              [ast (System.parse text)]
+              [_ (Builtin.debug "two")]
+              [_ (verify ast)]
+              [_ (Builtin.debug "three")]
+              [deps (scan ast)]
+              [_ (Builtin.debug "four")]
+              ; TODO cycle detection
+              [_ (Util.map runModule deps)]
+              [_ (Builtin.debug "five")]
+              [mod (System.eval ast)])
+         mod)))
+
+  (= verify
+     (lambda (ast)
+       ; TODO actually verify
+       #true))
+
+  (= scan
+     (lambda (ast)
+       ; TODO need primitives for traversing syntax
+       '())))
+
+(Loader.runModule "Example")

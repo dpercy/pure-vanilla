@@ -36,9 +36,13 @@ Limitations of this parser:
                                     [scope (foldr scope-add scope params)])
                                (Func params
                                      (parse body scope)))]
+      ; macros / syntax sugar
       [`(let ([,lhs ,rhs] ...) ,body) (r `((lambda ,lhs ,body) ,@rhs))]
       [`(let* ([,lhs ,rhs] ...) ,body) (r (foldr (lambda (l r b) `(let ([,l ,r]) ,b))
                                                  body lhs rhs))]
+      [`(cond [,lhs ,rhs] ... [else ,final]) (r (foldr (lambda (l r c) `(if ,l ,r ,c))
+                                                       final lhs rhs))]
+      [`(cond ,cases ...) (r `(cond ,@cases [else (error "no case")]))]
       [(cons head tail) (Call (r head) (map r tail))])))
 
 
@@ -90,4 +94,8 @@ Limitations of this parser:
   (check-equal? (parse '(let ([x 1] [y 2]) z))
                 (parse '((lambda (x y) z) 1 2)))
   (check-equal? (parse '(let* ([x 1] [y 2]) z))
-                (parse '(let ([x 1]) (let ([y 2]) z)))))
+                (parse '(let ([x 1]) (let ([y 2]) z))))
+  (check-equal? (parse '(cond [1 2] [3 4] [else 5]))
+                (parse '(if 1 2 (if 3 4 5))))
+  (check-equal? (parse '(cond [1 2] [3 4]))
+                (parse '(if 1 2 (if 3 4 (error "no case"))))))

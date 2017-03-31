@@ -1,0 +1,6 @@
+(module Example
+    #;()
+
+  (Builtin.debug "hi")
+
+  )
