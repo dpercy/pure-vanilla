@@ -1,6 +1,6 @@
 (module Example
     #;()
 
-  (Builtin.debug "hi")
+  (Builtin.debug ExampleLib.msg)
 
   )

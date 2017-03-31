@@ -44,7 +44,7 @@ Limitations of this simple evaluator:
 
 (define (compile expr)
   (match expr
-    [(Module mn body) `(begin ,@(map compile body))]
+    [(Module mn body) `(begin ,@(map compile body) (void))]
     [(Def (Global mn name) rhs) `(set-global! (quote ,mn) (quote ,name) ,(compile rhs))]
     [(? Using?) `(void)]
     ; expressions

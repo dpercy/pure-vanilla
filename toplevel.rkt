@@ -12,7 +12,8 @@
        (hash 'readFile read-file
              'parse (lambda (text) (parse (with-input-from-string text read)))
              'eval (lambda (ast) (eval ast modstore))
-             )))
+             'moduleExists (lambda (mn)
+                             (hash-has-key? modstore (string->symbol mn))))))
 
 (define (make-builtin-module)
   (Mod 'Builtin
@@ -21,10 +22,41 @@
              'first first
              'rest rest
              'debug displayln
+             'apply apply
+             'makeVariadic (lambda (f) (lambda args (f args)))
+             'error (lambda (msg) (error (~a msg)))
+             '== equal?
              )))
 
+(define (Syntax.unpack tag ast)
+  (define (tag? name) (equal? tag (Global 'Syntax name)))
+  (define (unsymbol v) (if (symbol? v) (symbol->string v) v))
+  (define (map-unsymbol v) (and v (map unsymbol v)))
+  (map-unsymbol
+   (match ast
+     [(Module modname statements) (and (tag? 'Module) (list modname statements))]
+     [(Using  modname)            (and (tag? 'Using)  (list modname))]
+     [(Def    var expr)           (and (tag? 'Def)    (list var expr))]
+     [(Lit    value)              (and (tag? 'Lit)    (list value))]
+     [(Quote  subast)             (and (tag? 'Quote)  (list subast))]
+     [(Local  name number)        (and (tag? 'Local)  (list name number))]
+     [(Global mod name)           (and (tag? 'Global) (list mod name))]
+     [(Func   params body)        (and (tag? 'Func)   (list params body))]
+     [(Call   func args)          (and (tag? 'Call)   (list func args))]
+     [(If     test consq alt)     (and (tag? 'If)     (list test consq alt))])))
+(module+ test
+  (require rackunit)
+  (check-equal? (Syntax.unpack (Global 'Syntax 'Global) (Global 'm 'x))
+                (list "m" "x")))
+
+(define (make-syntax-module)
+  (Mod 'Syntax
+       (hash 'unpack Syntax.unpack)
+       ))
+
 (define (run-toplevel! in)
-  (define modstore (make-hash (list (cons 'Builtin (make-builtin-module)))))
+  (define modstore (make-hash (list (cons 'Builtin (make-builtin-module))
+                                    (cons 'Syntax (make-syntax-module)))))
   (hash-set! modstore 'System (make-system-module modstore))
   (for ([form (in-producer read eof-object? in)])
     (with-handlers ([exn:fail? (lambda (exn)

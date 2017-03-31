@@ -5,27 +5,62 @@
        (if (Builtin.isEmpty lst)
            '()
            (Builtin.link (f (Builtin.first lst))
-                         (map f (Builtin.rest lst)))))))
+                         (map f (Builtin.rest lst))))))
+
+  (= second
+     (lambda (v) (Builtin.first (Builtin.rest v))))
+
+  (= list (Builtin.makeVariadic (lambda (lst) lst)))
+
+  (= cases
+     (lambda (ast handlers)
+       (if (Builtin.isEmpty handlers)
+           (Builtin.error (list "no case for ast" ast))
+           (let* ([tag (Builtin.first (Builtin.first handlers))]
+                  [handler (second (Builtin.first handlers))]
+                  [unpacked (Syntax.unpack tag ast)])
+             (if unpacked
+                 (Builtin.apply handler unpacked)
+                 (cases ast (Builtin.rest handlers)))))))
+
+  (= foldr (lambda (f base lst)
+             (if (Builtin.isEmpty lst)
+                 base
+                 (f (Builtin.first lst)
+                    (foldr f base (Builtin.rest lst))))))
+
+  (= append2 (lambda (a b) (foldr Builtin.link b a)))
+  (= append (Builtin.makeVariadic (lambda (lists) (foldr append2 '() lists))))
+
+  (= filter (lambda (pred lst)
+              (if (Builtin.isEmpty lst)
+                  '()
+                  (if (pred (Builtin.first lst))
+                      (Builtin.link (Builtin.first lst) (filter pred (Builtin.rest lst)))
+                      (filter pred (Builtin.rest lst))))))
+
+  (= remove (lambda (elem lst)
+              (filter (lambda (x) (if (Builtin.== elem x) #false #true)) lst))))
 
 (module Loader
     #;()
 
+  (= list Util.list)
+
   (= runModule
      (lambda (modname) ; as a string
-       ; interpret modname as a filename
-       (let* ([text (System.readFile modname)]
-              [_ (Builtin.debug "one")]
-              [ast (System.parse text)]
-              [_ (Builtin.debug "two")]
-              [_ (verify ast)]
-              [_ (Builtin.debug "three")]
-              [deps (scan ast)]
-              [_ (Builtin.debug "four")]
-              ; TODO cycle detection
-              [_ (Util.map runModule deps)]
-              [_ (Builtin.debug "five")]
-              [mod (System.eval ast)])
-         mod)))
+       (if (System.moduleExists modname)
+           "already exists"
+           ; interpret modname as a filename
+           (let* ([text (System.readFile modname)]
+                  [ast (System.parse text)]
+                  [_ (verify ast)]
+                  [deps (Util.remove modname (scan ast))]
+                  [_ (Builtin.debug (list "deps" deps))]
+                  ; TODO cycle detection
+                  [_ (Util.map runModule deps)]
+                  [mod (System.eval ast)])
+             mod))))
 
   (= verify
      (lambda (ast)
@@ -33,8 +68,22 @@
        #true))
 
   (= scan
-     (lambda (ast)
-       ; TODO need primitives for traversing syntax
-       '())))
+     (lambda (ast) ; -> list of
+       (Util.cases
+        ast
+        (list
+         (list #'Syntax.Global (lambda (mod name) (list mod)))
+         (list #'Syntax.Module (lambda (modname statements) (scanMany statements)))
+         (list #'Syntax.Using (lambda (modname) (list)))
+         (list #'Syntax.Def (lambda (var expr) (scan expr)))
+         (list #'Syntax.Lit (lambda (value) (list)))
+         (list #'Syntax.Quote (lambda (subast) (scan subast)))
+         (list #'Syntax.Local (lambda (name number) (list)))
+         (list #'Syntax.Func (lambda (params body) (scan body)))
+         (list #'Syntax.Call (lambda (func args) (scanMany (Builtin.link func args))))
+         (list #'Syntax.If (lambda (test consq alt) (scanMany (list test consq alt))))))))
+  (= scanMany
+     (lambda (asts)
+       (Builtin.apply Util.append (Util.map scan asts)))))
 
 (Loader.runModule "Example")
