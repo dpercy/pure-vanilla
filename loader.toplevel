@@ -40,7 +40,16 @@
                       (filter pred (Builtin.rest lst))))))
 
   (= remove (lambda (elem lst)
-              (filter (lambda (x) (if (Builtin.== elem x) #false #true)) lst))))
+              (filter (lambda (x) (if (Builtin.== elem x) #false #true)) lst)))
+
+  (= any (lambda (pred lst)
+           (cond
+             [(Builtin.isEmpty lst) #false]
+             [(pred (Builtin.first lst)) #true]
+             [else (any pred (Builtin.rest lst))])))
+
+  (= contains (lambda (lst elem)
+                (any (lambda (x) (Builtin.== x elem)) lst))))
 
 (module Loader
     #;()
@@ -48,19 +57,26 @@
   (= list Util.list)
 
   (= runModule
-     (lambda (modname) ; as a string
-       (if (System.moduleExists modname)
-           "already exists"
-           ; interpret modname as a filename
-           (let* ([text (System.readFile modname)]
-                  [ast (System.parse text)]
-                  [_ (verify ast)]
-                  [deps (Util.remove modname (scan ast))]
-                  [_ (Builtin.debug (list "deps" deps))]
-                  ; TODO cycle detection
-                  [_ (Util.map runModule deps)]
-                  [mod (System.eval ast)])
-             mod))))
+     (lambda (modname)
+       (runModuleHelper modname '())))
+  (= runModuleHelper
+     (lambda (modname seen)
+       (let ([_ (Builtin.debug (list "runModuleHelper" modname seen))])
+         (cond
+           [(System.moduleExists modname) "already exists"]
+           [(Util.contains seen modname) (Builtin.error (list "cyclic module dependency:" seen))]
+           [else
+            ; interpret modname as a filename
+            (let* ([text (System.readFile modname)]
+                   [ast (System.parse text)]
+                   [_ (verify ast)]
+                   [deps (Util.remove modname (scan ast))]
+                   [_ (Builtin.debug (list "deps for" modname "are" deps))]
+                   [_ (let* ([seen (Builtin.link modname seen)]
+                             [runModule (lambda (modname) (runModuleHelper modname seen))])
+                        (Util.map runModule deps))]
+                   [mod (System.eval ast)])
+              mod)]))))
 
   (= verify
      (lambda (ast)
