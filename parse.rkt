@@ -43,6 +43,10 @@ Limitations of this parser:
       [`(cond [,lhs ,rhs] ... [else ,final]) (r (foldr (lambda (l r c) `(if ,l ,r ,c))
                                                        final lhs rhs))]
       [`(cond ,cases ...) (r `(cond ,@cases [else (error "no case")]))]
+      [`(begin ,forms ... ,last) (r (foldr (lambda (stmt expr)
+                                             `(let ([_ ,stmt]) ,expr))
+                                           last
+                                           forms))]
       [(cons head tail) (Call (r head) (map r tail))])))
 
 
@@ -98,4 +102,6 @@ Limitations of this parser:
   (check-equal? (parse '(cond [1 2] [3 4] [else 5]))
                 (parse '(if 1 2 (if 3 4 5))))
   (check-equal? (parse '(cond [1 2] [3 4]))
-                (parse '(if 1 2 (if 3 4 (error "no case"))))))
+                (parse '(if 1 2 (if 3 4 (error "no case")))))
+  (check-equal? (parse '(begin 1 2 3))
+                (parse '(let* ([_ 1] [_ 2]) 3))))
