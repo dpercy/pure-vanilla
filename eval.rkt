@@ -43,19 +43,31 @@ Limitations of this simple evaluator:
   (racket:eval (datum->syntax #'() wrapped-expr)))
 
 (define (compile expr)
-  (match expr
-    [(Module mn body) `(begin ,@(map compile body) (void))]
-    [(Def (Global mn name) rhs) `(set-global! (quote ,mn) (quote ,name) ,(compile rhs))]
-    [(? Using?) `(void)]
-    ; expressions
-    [(Lit v) `(quote ,v)]
-    [(Quote ast) `(quote ,ast)]
-    [(Local name num) (format-symbol "~a.~a" name num)]
-    [(Global mod name) `(get-global (quote ,mod) (quote ,name))]
-    [(Func params body) `(lambda ,(map compile params)
-                           ,(compile body))]
-    [(Call func args) `(#%app ,(compile func)
-                              ,@(map compile args))]
-    [(If t c a) `(if ,(compile t)
-                     ,(compile c)
-                     ,(compile a))]))
+  (let recur ([expr expr]
+              [current-mod #f])
+    (define (compile expr) (recur expr current-mod))
+    (match expr
+      [(Module mn body) `(begin ,@(for/list ([stmt body])
+                                    (recur stmt mn))
+                                ; TODO return instead of assign here
+                                ,@(for/list ([stmt body] #:when (Def? stmt))
+                                    (match stmt
+                                      [(Def (Global mod name) rhs)
+                                       `(set-global! (quote ,mn) (quote ,name) ,(compile rhs))]))
+                                (void))]
+      [(Def lhs rhs) `(define ,(compile lhs) ,(compile rhs))]
+      [(? Using?) `(void)]
+      ; expressions
+      [(Lit v) `(quote ,v)]
+      [(Quote ast) `(quote ,ast)]
+      [(Local name num) (format-symbol "~a.~a" name num)]
+      [(Global mod name) (if (equal? mod current-mod)
+                             (format-symbol "~a.~a" mod name)
+                             `(get-global (quote ,mod) (quote ,name)))]
+      [(Func params body) `(lambda ,(map compile params)
+                             ,(compile body))]
+      [(Call func args) `(#%app ,(compile func)
+                                ,@(map compile args))]
+      [(If t c a) `(if ,(compile t)
+                       ,(compile c)
+                       ,(compile a))])))
