@@ -13,6 +13,13 @@
        (hash 'readFile read-file
              'parse (lambda (text) (parse (with-input-from-string text read)))
              'eval (lambda (ast) (eval ast modstore))
+             'registerModule (lambda (mod)
+                               (when (not (Mod? mod))
+                                 (error "not an evaluated module: ~v" mod))
+                               (define mn (Mod-name mod))
+                               (when (hash-has-key? modstore mn)
+                                 (error "module already exists: ~a" mn))
+                               (hash-set! modstore mn mod))
              'moduleExists (lambda (mn)
                              (hash-has-key? modstore (string->symbol mn))))))
 

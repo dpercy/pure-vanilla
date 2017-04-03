@@ -76,7 +76,7 @@
                              [runModule (lambda (modname) (runModuleHelper modname seen))])
                         (Util.map runModule deps))]
                    [mod (System.eval ast)])
-              mod)]))))
+              (System.registerModule mod))]))))
 
   (= verify
      (lambda (ast)
