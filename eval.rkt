@@ -30,14 +30,7 @@ Limitations of this simple evaluator:
                                              (error 'eval "no such module: ~a" mn))))
                                 name
                                 (lambda ()
-                                  (error 'eval "module ~a doesn't define ~a" mn name)))))]
-           [set-global!
-            (quote ,(lambda (mn name value)
-                      (match-define (Mod _ values)
-                        (hash-ref modstore mn
-                                  (lambda () (Mod mn (hash)))))
-                      (hash-set! modstore mn
-                                 (Mod name (hash-set values name value)))))])
+                                  (error 'eval "module ~a doesn't define ~a" mn name)))))])
        ,core-expr))
   (displayln (list 'compiled core-expr))
   (racket:eval (datum->syntax #'() wrapped-expr)))
@@ -50,12 +43,14 @@ Limitations of this simple evaluator:
       [(Module mn body) (let* ([globals (map Def-var (filter Def? body))]
                                [global-names (map Global-name globals)]
                                [global-exprs (for/list ([g globals]) (recur g mn))])
-                          `(begin ,@(for/list ([stmt body])
-                                      (recur stmt mn))
-                                  (Mod (quote ,mn)
-                                       (for/hash ([name '(,@global-names)]
-                                                  [value (list ,@global-exprs)])
-                                         (values name value)))))]
+                          `(let ()
+                             ,@(for/list ([stmt body])
+                                 (recur stmt mn))
+                             ; a run-time construct a hash wrapped in a Mod.
+                             (Mod (quote ,mn)
+                                  (for/hash ([name '(,@global-names)]
+                                             [value (list ,@global-exprs)])
+                                    (values name value)))))]
       [(Def lhs rhs) `(define ,(compile lhs) ,(compile rhs))]
       [(? Using?) `(void)]
       ; expressions
