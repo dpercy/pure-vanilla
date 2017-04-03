@@ -47,14 +47,15 @@ Limitations of this simple evaluator:
               [current-mod #f])
     (define (compile expr) (recur expr current-mod))
     (match expr
-      [(Module mn body) `(begin ,@(for/list ([stmt body])
-                                    (recur stmt mn))
-                                ; TODO return instead of assign here
-                                ,@(for/list ([stmt body] #:when (Def? stmt))
-                                    (match stmt
-                                      [(Def (Global mod name) rhs)
-                                       `(set-global! (quote ,mn) (quote ,name) ,(compile rhs))]))
-                                (void))]
+      [(Module mn body) (let* ([globals (map Def-var (filter Def? body))]
+                               [global-names (map Global-name globals)]
+                               [global-exprs (for/list ([g globals]) (recur g mn))])
+                          `(begin ,@(for/list ([stmt body])
+                                      (recur stmt mn))
+                                  (Mod (quote ,mn)
+                                       (for/hash ([name '(,@global-names)]
+                                                  [value (list ,@global-exprs)])
+                                         (values name value)))))]
       [(Def lhs rhs) `(define ,(compile lhs) ,(compile rhs))]
       [(? Using?) `(void)]
       ; expressions

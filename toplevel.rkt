@@ -9,6 +9,7 @@
 
 (define (make-system-module modstore)
   (Mod 'System
+       ; TODO make these effects
        (hash 'readFile read-file
              'parse (lambda (text) (parse (with-input-from-string text read)))
              'eval (lambda (ast) (eval ast modstore))
@@ -61,9 +62,12 @@
   (for ([form (in-producer read eof-object? in)])
     (with-handlers ([exn:fail? (lambda (exn)
                                  ((error-display-handler) (exn-message exn) exn))])
-      (define v (eval (parse form) modstore))
-      (displayln (format "value: ~v" v))
-      )))
+      (match (parse form)
+        [(? Module? ast) (let ([m (eval ast modstore)])
+                           (hash-set! modstore (Mod-name m) m)
+                           (displayln (format "module: ~v" m)))]
+        [ast (let ([v (eval ast modstore)])
+               (displayln (format "value: ~v" v)))]))))
 
 ;;(define (embed-mod mod-val)) ; -> DefMod
 (module+ main
