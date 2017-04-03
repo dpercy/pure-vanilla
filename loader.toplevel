@@ -102,4 +102,7 @@
      (lambda (asts)
        (Builtin.apply Util.append (Util.map scan asts)))))
 
-(Loader.runModule "Example")
+(let ([args (System.getArgs)])
+  (if (Builtin.isEmpty args)
+      (Builtin.error "specify a main module")
+      (Loader.runModule (Builtin.first args))))

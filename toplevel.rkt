@@ -21,7 +21,9 @@
                                  (error "module already exists: ~a" mn))
                                (hash-set! modstore mn mod))
              'moduleExists (lambda (mn)
-                             (hash-has-key? modstore (string->symbol mn))))))
+                             (hash-has-key? modstore (string->symbol mn)))
+             'getArgs (lambda ()
+                        (vector->list (current-command-line-arguments))))))
 
 (define (make-builtin-module)
   (Mod 'Builtin
@@ -79,7 +81,14 @@
 ;;(define (embed-mod mod-val)) ; -> DefMod
 (module+ main
 
-  (run-toplevel! (current-input-port))
+  (match (vector->list (current-command-line-arguments))
+    [(cons boot-script rest-args)
+     (with-input-from-file boot-script
+       (lambda ()
+         (parameterize ([current-command-line-arguments
+                         (list->vector rest-args)])
+           (run-toplevel! (current-input-port)))))]
+    [_ (error 'toplevel "specify a boot script")])
 
   ;;
   )
