@@ -36,6 +36,7 @@
              'makeVariadic (lambda (f) (lambda args (f args)))
              'error (lambda (msg) (error (~a msg)))
              '== equal?
+             'void void
              )))
 
 (define (Syntax.unpack tag ast)
@@ -69,14 +70,16 @@
                                     (cons 'Syntax (make-syntax-module)))))
   (hash-set! modstore 'System (make-system-module modstore))
   (for ([form (in-producer read eof-object? in)])
+    #;
     (with-handlers ([exn:fail? (lambda (exn)
-                                 ((error-display-handler) (exn-message exn) exn))])
-      (match (parse form)
-        [(? Module? ast) (let ([m (eval ast modstore)])
-                           (hash-set! modstore (Mod-name m) m)
-                           (displayln (format "module: ~v" m)))]
-        [ast (let ([v (eval ast modstore)])
-               (displayln (format "value: ~v" v)))]))))
+                                 ((error-display-handler) (exn-message exn) exn))]))
+
+    (match (parse form)
+      [(? Module? ast) (let ([m (eval ast modstore)])
+                         (hash-set! modstore (Mod-name m) m)
+                         (displayln (format "module: ~v" m)))]
+      [ast (let ([v (eval ast modstore)])
+             (displayln (format "value: ~v" v)))])))
 
 ;;(define (embed-mod mod-val)) ; -> DefMod
 (module+ main

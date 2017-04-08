@@ -30,23 +30,32 @@ Limitations of this parser:
       [(? symbol?) (parse-var form scope)]
       [(? self-quoting?)  (Lit form)]
       [`(quote ,v)  (Lit v)]
+      [`(quote ,@_) (error (format "bad quote form: ~v" form))]
       [`(syntax ,v) (Quote (r v))]
+      [`(syntax ,@_) (error (format "bad syntax form: ~v" form))]
       [`(if ,t ,c ,a) (If (r t) (r c) (r a))]
+      [`(if ,@_) (error (format "bad if form: ~v" form))]
       [`(lambda ,vars ,body) (let* ([params (map (make-local scope) vars)]
                                     [scope (foldr scope-add scope params)])
                                (Func params
                                      (parse body scope)))]
+      [`(lambda ,@_) (error (format "bad lambda form: ~v" form))]
+
       ; macros / syntax sugar
       [`(let ([,lhs ,rhs] ...) ,body) (r `((lambda ,lhs ,body) ,@rhs))]
+      [`(let ,@_) (error (format "bad let form: ~v" form))]
       [`(let* ([,lhs ,rhs] ...) ,body) (r (foldr (lambda (l r b) `(let ([,l ,r]) ,b))
                                                  body lhs rhs))]
+      [`(let* ,@_) (error (format "bad let* form: ~v" form))]
       [`(cond [,lhs ,rhs] ... [else ,final]) (r (foldr (lambda (l r c) `(if ,l ,r ,c))
                                                        final lhs rhs))]
       [`(cond ,cases ...) (r `(cond ,@cases [else (error "no case")]))]
+      [`(cond ,@_) (error (format "bad cond form: ~v" form))]
       [`(begin ,forms ... ,last) (r (foldr (lambda (stmt expr)
                                              `(let ([_ ,stmt]) ,expr))
                                            last
                                            forms))]
+      [`(begin ,@_) (error (format "bad begin form: ~v" form))]
       [(cons head tail) (Call (r head) (map r tail))])))
 
 
