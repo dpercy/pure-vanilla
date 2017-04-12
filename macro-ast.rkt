@@ -21,6 +21,7 @@ but which you can analyze as a proper tree.
 (struct Global (name) #:transparent)
 (struct Func (params body) #:transparent)
 (struct If (test consq alt) #:transparent)
+(struct Call (func args) #:transparent)
 (struct Macro (name args result) #:transparent)
 
 
@@ -32,8 +33,15 @@ but which you can analyze as a proper tree.
 (define (and-macro a b)
   `(if ,a ,b #false))
 
+(define (let-macro binds body)
+  (match binds
+    [(IM (list (IM (list lhs rhs) _) ...) _)
+     `(call (lambda ,lhs ,body)
+            ,@rhs)]))
+
 
 (define (p sexp)
+  (set! counter 0)
   (extract (parse (instrument sexp))))
 
 (define (instrument sexp)
@@ -50,7 +58,7 @@ but which you can analyze as a proper tree.
       [(IM v _) (unwrap v)]
       [v v]))
   (match (unwrap intm)
-    [(? list?) (map extract intm)]
+    [(? list? intm) (map extract intm)]
     [(If t c a) (If (extract t)
                     (extract c)
                     (extract a))]
@@ -76,10 +84,14 @@ but which you can analyze as a proper tree.
                        [env (for/fold ([env env]) ([n names] [l locals])
                               (hash-set env n l))])
                   (Func locals (parse body env)))]
+               [(list* (app IM-sexp 'call) func args) (Call (recur func) (map recur args))]
                ; macros!
                [(list* (app IM-sexp 'and) args)
                 (Macro 'and args
-                       (recur (instrument (apply and-macro args))))])])
+                       (recur (instrument (apply and-macro args))))]
+               [(list* (app IM-sexp 'let) args)
+                (Macro 'let args
+                       (recur (instrument (apply let-macro args))))])])
       (set-box! (IM-vb intm) v)
       v)))
 (define counter 0)
@@ -109,4 +121,16 @@ but which you can analyze as a proper tree.
                 (Macro 'and
                        (list (Global 'x)
                              (Lit 2))
-                       (If (Global 'x) (Lit 2) (Lit #false)))))
+                       (If (Global 'x) (Lit 2) (Lit #false))))
+  (check-equal? (p '(call 1 2 3))
+                (Call (Lit 1) (list (Lit 2) (Lit 3))))
+  (check-equal? (p '(let ([a a] [b 2]) a))
+                (Macro 'let
+                       (list (list (list (Local 'a 0) (Global 'a))
+                                   (list (Local 'b 1) (Lit 2)))
+                             (Local 'a 0))
+                       (Call (Func (list (Local 'a 0)
+                                         (Local 'b 1))
+                                   (Local 'a 0))
+                             (list (Global 'a)
+                                   (Lit 2))))))
