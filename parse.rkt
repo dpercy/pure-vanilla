@@ -51,6 +51,17 @@ Limitations of this parser:
                                                        final lhs rhs))]
       [`(cond ,cases ...) (r `(cond ,@cases [else (error "no case")]))]
       [`(cond ,@_) (error (format "bad cond form: ~v" form))]
+
+      [`(and) #true]
+      [`(and ,x) (r x)]
+      [`(and ,x ,y) (r `(if ,x ,y #false))]
+      [`(and ,x ,@xs) (r `(and ,x (and ,@xs)))]
+
+      [`(or) #false]
+      [`(or ,x) (r x)]
+      [`(or ,x ,y)  (r `(if ,x #true ,y))]
+      [`(or ,x ,@xs) (r `(or ,x (or ,@xs)))]
+
       [`(begin ,forms ... ,last) (r (foldr (lambda (stmt expr)
                                              `(let ([_ ,stmt]) ,expr))
                                            last

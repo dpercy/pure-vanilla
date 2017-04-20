@@ -59,7 +59,174 @@
              [else (any pred (Builtin.rest lst))])))
 
   (= contains (lambda (lst elem)
-                (any (lambda (x) (Builtin.== x elem)) lst))))
+                (any (lambda (x) (Builtin.== x elem)) lst)))
+
+  (= explode (lambda (string)
+               (if (== (strlen string) 0)
+                   '()
+                   (cons (slice string 0 1)
+                         (explode (slice string 1)))))))
+
+(module Lexer
+    #;()
+
+  #|
+
+  delimiters:
+  ()[]{},;
+
+  TODO add qualified idens and ops
+  - no space allowed around dot - dot is not a separate token
+
+  iden := ( alpha | "_" ) ( alpha | digit | "_" )*
+
+  num := digit+
+
+  op := symbol+
+  where symbol is any non-alpha, non-digit, non-whitespace, non-comment-start, non-delimiter
+
+  string := doublequote ( nonquotenonbackslash | escapesequence )* doublequote
+
+  - fixed tokens are represented by strings: "eof", "(", "\n", etc
+
+
+  |#
+
+  (= Iden #'Iden) ; holds the iden as a string, like "myIden123"
+  (= Op #'Op) ; holds the iden as a string, like "<"
+  (= Num #'Num) ; holds the number as a string, like "123"
+  (= Str #'Str) ; holds the *value* of the string, like "\t"; NOT "\"\\t\""
+
+  (= ord Builtin.ord)
+  (= < Builtin.<)
+  (= == Builtin.==)
+
+  (= delimiters (explode "()[]{},;\n"))
+  (= isDelimiter (lambda (c) (Builtin.contains delimiters c)))
+
+  (= ops (explode "~!@$%^&*_-+=:<>/?"))
+  (= isOp (lambda (c) (Builtin.contains ops c)))
+
+  (= isDigit (lambda (c) (and (<= (ord "0") (ord c)) (<= (ord c) (ord "9")))))
+  (= isLower (lambda (c) (and (<= (ord "a") (ord c)) (<= (ord c) (ord "z")))))
+  (= isUpper (lambda (c) (and (<= (ord "A") (ord c)) (<= (ord c) (ord "Z")))))
+  (= isAlpha (lambda (c) (or (isLower c) (isUpper c))))
+
+  (= isIdenStart (lambda (c) (or (== "_" c) (isAlpha c))))
+  (= isIden (lambda (c) (or (isIdentStart c) (isDigit c))))
+
+  (= lexAll
+     (lambda (string) ; -> listof token
+       (let* ([tokAndRest (lex string)]
+              [tok (Builtin.first string)]
+              [rest (Util.second string)])
+         (if (== tok "eof")
+             '()
+             (Builtin.cons tok (lexAll rest))))))
+
+  (= seekWhile
+     (lambda (pred string) ; index
+       ; return the first index in the string that fails the predicate
+       (seekWhileLoop pred string 0)))
+  (= seekWhileLoop
+     (lambda (pred string idx) ; index
+       (if (== idx (strlen string))
+           idx
+           (let ([c (slice string idx (+ idx 1))])
+             (if (pred c)
+                 (seekWhileLoop pred string (+ idx 1))
+                 idx)))))
+
+  ; TODO may need to trampoline this on implementations with small stacks:
+  ;  - add a function Builtin.trampoline
+  (= lex
+     (lambda (string) ; -> [token-or-eof, string]
+       (let ([string (eatWhitespaceAndComments string)])
+         (if (== 0 (strlen string))
+             (list "eof" string)
+             (let ([c (slice string 0 1)])
+               (cond
+                 [(isDelimiter c) (list c (slice string 1))]
+                 [(isIdenStart c) (lexIden string)]
+                 [(isDigit c) (lexNumber string)]
+                 [(isOp c) (lexOp string)]
+                 [(== c "\"") (lexStringContents (slice string 1))]
+                 [else (Builtin.error (list "lex: unexpected character:" c))]))))))
+
+  (= keywords (list "if" "then" "else"
+                    "fn" "->"))
+  (= isKeyword (lambda (s) (Builtin.contains keywords s)))
+
+  (= lexIden
+     (lambda (string)
+       (let* ([idx (seekWhile isIden string)]
+              [prefix (slice string 0 idx)]
+              [suffix (slice string idx)]
+              [tok (if (isKeyword prefix)
+                       prefix
+                       (Iden prefix))])
+         (list tok suffix))))
+
+  (= lexNumber
+     (lambda (string)
+       (let* ([idx (seekWhile isIden string)]
+              [prefix (slice string 0 idx)]
+              [suffix (slice string idx)]
+              [tok (Num prefix)])
+         ; leave the number as a string because the toplevel implementation
+         ; might not support very wide integers
+         (list tok suffix))))
+
+  (= lexOp
+     (lambda (string)
+       (let* ([idx (seekWhile isOp string)]
+              [prefix (slice string 0 idx)]
+              [suffix (slice string idx)]
+              [tok (if (isKeyword prefix)
+                       prefix
+                       (Op prefix))])
+         (list tok suffix))))
+
+  (= lexStringContents
+     (lambda (string)
+       ; TODO get characters one by one, interpreting escapes; stop at doublequote.
+       ))
+
+  (= eatWhitespaceAndComments
+     (lambda (string) ; -> string
+       (if (== 0 (strlen string))
+           string
+           (let ([c (slice string 0 1)])
+             (cond
+               [(== c " ") (eatWhitespaceAndComments (slice string 1))]
+               [(== c "\t") (eatWhitespaceAndComments (slice string 1))]
+               [(== c "#") (let ([idx (seekWhile (lambda (c) (not (== "\n" c)))
+                                                 string)])
+                             (eatWhitespaceAndComments (slice string idx)))]))))))
+
+(module Parser
+    #;()
+
+  #|
+
+  grammar:
+
+  def := expr = expr
+
+  parseExpr :
+  .  peek:
+  .   - if -> parse an if
+  .   - fn -> parse a fn
+  .   - open -> parse a subexpr
+  .   - otherwise -> parseCall
+
+  parseCall :
+  .  - parseAtom
+  .  peek:
+  .   - if open paren: parse the args, then parseCall
+
+  |#
+  )
 
 (module Loader
     #;()

@@ -36,8 +36,12 @@
              'makeVariadic (lambda (f) (lambda args (f args)))
              'error (lambda (msg) (error (~a msg)))
              '== equal?
+             '< <
              'void void
-             )))
+             'strlen string-length
+             'slice substring
+             'ord (lambda (s) (match (string->list s) [(list c) (char->integer c)]))
+             'chr (lambda (i) (list->string (list (integer->char i)))))))
 
 (define (Syntax.unpack tag ast)
   (define (tag? name) (equal? tag (Global 'Syntax name)))
