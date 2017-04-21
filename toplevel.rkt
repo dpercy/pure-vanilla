@@ -39,6 +39,7 @@
              '< <
              'void void
              'strlen string-length
+             'strcat string-append
              'slice substring
              'ord (lambda (s) (match (string->list s) [(list c) (char->integer c)]))
              'chr (lambda (i) (list->string (list (integer->char i)))))))
