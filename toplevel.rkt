@@ -25,6 +25,14 @@
              'getArgs (lambda ()
                         (vector->list (current-command-line-arguments))))))
 
+(struct Tagged (tag values) #:transparent)
+(define/contract (tag t args) (-> Global? list? Tagged?)
+  (Tagged t args))
+(define/contract (untag t v) (-> Global? Tagged? (or/c #false list?))
+  (if (equal? t (Tagged-tag v))
+      (Tagged-values v)
+      #false))
+
 (define (make-builtin-module)
   (Mod 'Builtin
        (hash 'isEmpty empty?
@@ -35,8 +43,11 @@
              'apply apply
              'makeVariadic (lambda (f) (lambda args (f args)))
              'error (lambda (msg) (error (~a msg)))
+             'tag tag
+             'untag untag
              '== equal?
              '< <
+             '+ +
              'void void
              'strlen string-length
              'strcat string-append
@@ -45,6 +56,7 @@
              'chr (lambda (i) (list->string (list (integer->char i)))))))
 
 (define (Syntax.unpack tag ast)
+  ; TODO unify this with Builtin.apply
   (define (tag? name) (equal? tag (Global 'Syntax name)))
   (define (unsymbol v) (if (symbol? v) (symbol->string v) v))
   (define (map-unsymbol v) (and v (map unsymbol v)))

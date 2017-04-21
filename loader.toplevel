@@ -20,10 +20,14 @@
 
   (= list (Builtin.makeVariadic (lambda (lst) lst)))
 
+  (= > (lambda (x y) (Builtin.< y x)))
+  (= >= (lambda (x y) (not (Builtin.< x y))))
+  (= <= (lambda (x y) (>= y x)))
+
   (= cases
      (lambda (ast handlers)
        (if (Builtin.isEmpty handlers)
-           (Builtin.error (list "no case for ast" ast))
+           (Builtin.error (Util.list "no case for ast" ast))
            (let* ([tag (Builtin.first (Builtin.first handlers))]
                   [handler (second (Builtin.first handlers))]
                   [unpacked (Syntax.unpack tag ast)])
@@ -92,20 +96,26 @@
 
   |#
 
-  (= Iden #'Iden) ; holds the iden as a string, like "myIden123"
-  (= Op #'Op) ; holds the iden as a string, like "<"
-  (= Num #'Num) ; holds the number as a string, like "123"
-  (= Str #'Str) ; holds the *value* of the string, like "\t"; NOT "\"\\t\""
+  (= makeConstructor1
+     (lambda (t) (lambda (a)
+                   (Builtin.tag t (Util.list a)))))
+
+  (= Iden (makeConstructor1 #'Iden)) ; holds the iden as a string, like "myIden123"
+  (= Op   (makeConstructor1 #'Op))   ; holds the iden as a string, like "<"
+  (= Num  (makeConstructor1 #'Num))  ; holds the number as a string, like "123"
+  (= Str  (makeConstructor1 #'Str))  ; holds the *value* of the string, like "\t"; NOT "\"\\t\""
 
   (= ord Builtin.ord)
   (= < Builtin.<)
+  (= <= Util.<=)
+  (= + Builtin.+)
   (= == Builtin.==)
 
   (= delimiters (Util.explode "()[]{},;\n"))
-  (= isDelimiter (lambda (c) (Builtin.contains delimiters c)))
+  (= isDelimiter (lambda (c) (Util.contains delimiters c)))
 
   (= ops (Util.explode "~!@$%^&*_-+=:<>/?"))
-  (= isOp (lambda (c) (Builtin.contains ops c)))
+  (= isOp (lambda (c) (Util.contains ops c)))
 
   (= isDigit (lambda (c) (and (<= (ord "0") (ord c)) (<= (ord c) (ord "9")))))
   (= isLower (lambda (c) (and (<= (ord "a") (ord c)) (<= (ord c) (ord "z")))))
@@ -113,13 +123,13 @@
   (= isAlpha (lambda (c) (or (isLower c) (isUpper c))))
 
   (= isIdenStart (lambda (c) (or (== "_" c) (isAlpha c))))
-  (= isIden (lambda (c) (or (isIdentStart c) (isDigit c))))
+  (= isIden (lambda (c) (or (isIdenStart c) (isDigit c))))
 
   (= lexAll
      (lambda (string) ; -> listof token
        (let* ([tokAndRest (lex string)]
-              [tok (Builtin.first string)]
-              [rest (Util.second string)])
+              [tok (Builtin.first tokAndRest)]
+              [rest (Util.second tokAndRest)])
          (if (== tok "eof")
              '()
              (Builtin.link tok (lexAll rest))))))
@@ -155,7 +165,7 @@
 
   (= keywords (Util.list "if" "then" "else"
                          "fn" "->"))
-  (= isKeyword (lambda (s) (Builtin.contains keywords s)))
+  (= isKeyword (lambda (s) (Util.contains keywords s)))
 
   (= lexIden
      (lambda (string)
@@ -201,7 +211,8 @@
                                      [afterQuote (Builtin.slice string (+ idx 1))]
                                      [s (strcat prefix beforeQuote)])
                                 (Util.list (Str s) afterQuote))]
-                 [(== c "\\") (Builtin.error "TODO interpret escapes")]))))))
+                 [(== c "\\") (Builtin.error "TODO interpret escapes")]
+                 [else (Builtin.error (Util.list "no case in lexStringContents for" c))]))))))
 
   (= eatWhitespaceAndComments
      (lambda (string) ; -> string
@@ -213,7 +224,8 @@
                [(== c "\t") (eatWhitespaceAndComments (Builtin.slice string 1))]
                [(== c "#") (let ([idx (seekWhile (lambda (c) (not (== "\n" c)))
                                                  string)])
-                             (eatWhitespaceAndComments (Builtin.slice string idx)))]))))))
+                             (eatWhitespaceAndComments (Builtin.slice string idx)))]
+               [else string]))))))
 
 (module Parser
     #;()
@@ -295,7 +307,7 @@
                                                             ; - check modname matches
                                                             (if (Builtin.== mod modname)
                                                                 name
-                                                                (error "def modname mismatch")))))))
+                                                                (Builtin.error "def modname mismatch")))))))
                                  lhses)])
                           ; - check no dupes
                           (verifyDistinct lhsNames))

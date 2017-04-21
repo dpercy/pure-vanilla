@@ -3,4 +3,7 @@
 
   (Builtin.debug ExampleLib.msg)
 
+  (Builtin.debug (Lexer.lexAll "f(asdf,wer)"))
+
+
   )

@@ -49,7 +49,7 @@ Limitations of this parser:
       [`(let* ,@_) (error (format "bad let* form: ~v" form))]
       [`(cond [,lhs ,rhs] ... [else ,final]) (r (foldr (lambda (l r c) `(if ,l ,r ,c))
                                                        final lhs rhs))]
-      [`(cond ,cases ...) (r `(cond ,@cases [else (error "no case")]))]
+      [`(cond ,cases ...) (r `(cond ,@cases [else (Builtin.error "no case")]))]
       [`(cond ,@_) (error (format "bad cond form: ~v" form))]
 
       [`(and) #true]
