@@ -77,7 +77,7 @@
   #|
 
   delimiters:
-  ()[]{},;
+  ()[]{},                               ;
 
   TODO add qualified idens and ops
   - no space allowed around dot - dot is not a separate token
@@ -100,10 +100,20 @@
      (lambda (t) (lambda (a)
                    (Builtin.tag t (Util.list a)))))
 
+  (= makePredicate
+     (lambda (t)
+       (lambda (v)
+         (Util.not (== #false (Builtin.untag t v))))))
+
   (= Iden (makeConstructor1 #'Iden)) ; holds the iden as a string, like "myIden123"
-  (= Op   (makeConstructor1 #'Op))   ; holds the iden as a string, like "<"
-  (= Num  (makeConstructor1 #'Num))  ; holds the number as a string, like "123"
-  (= Str  (makeConstructor1 #'Str))  ; holds the *value* of the string, like "\t"; NOT "\"\\t\""
+  (= Op   (makeConstructor1 #'Op)) ; holds the iden as a string, like "<"
+  (= Num  (makeConstructor1 #'Num)) ; holds the number as a string, like "123"
+  (= Str  (makeConstructor1 #'Str)) ; holds the *value* of the string, like "\t"; NOT "\"\\t\""
+
+  (= isIden (makePredicate #'Iden))
+  (= isOp   (makePredicate #'Op))
+  (= isNum  (makePredicate #'Num))
+  (= isStr  (makePredicate #'Str))
 
   (= ord Builtin.ord)
   (= < Builtin.<)
@@ -114,8 +124,8 @@
   (= delimiters (Util.explode "()[]{},;\n"))
   (= isDelimiter (lambda (c) (Util.contains delimiters c)))
 
-  (= ops (Util.explode "~!@$%^&*_-+=:<>/?"))
-  (= isOp (lambda (c) (Util.contains ops c)))
+  (= opchars (Util.explode "~!@$%^&*_-+=:<>/?"))
+  (= isOpchar (lambda (c) (Util.contains ops c)))
 
   (= isDigit (lambda (c) (and (<= (ord "0") (ord c)) (<= (ord c) (ord "9")))))
   (= isLower (lambda (c) (and (<= (ord "a") (ord c)) (<= (ord c) (ord "z")))))
@@ -123,10 +133,10 @@
   (= isAlpha (lambda (c) (or (isLower c) (isUpper c))))
 
   (= isIdenStart (lambda (c) (or (== "_" c) (isAlpha c))))
-  (= isIden (lambda (c) (or (isIdenStart c) (isDigit c))))
+  (= isIdenChar (lambda (c) (or (isIdenStart c) (isDigit c))))
 
   (= lexAll
-     (lambda (string) ; -> listof token
+     (lambda (string)                   ; -> listof token
        (let* ([tokAndRest (lex string)]
               [tok (Builtin.first tokAndRest)]
               [rest (Util.second tokAndRest)])
@@ -135,11 +145,11 @@
              (Builtin.link tok (lexAll rest))))))
 
   (= seekWhile
-     (lambda (pred string) ; index
+     (lambda (pred string)              ; index
        ; return the first index in the string that fails the predicate
        (seekWhileLoop pred string 0)))
   (= seekWhileLoop
-     (lambda (pred string idx) ; index
+     (lambda (pred string idx)          ; index
        (if (== idx (Builtin.strlen string))
            idx
            (let ([c (Builtin.slice string idx (+ idx 1))])
@@ -150,7 +160,7 @@
   ; TODO may need to trampoline this on implementations with small stacks:
   ;  - add a function Builtin.trampoline
   (= lex
-     (lambda (string) ; -> [token-or-eof, string]
+     (lambda (string)                   ; -> [token-or-eof, string]
        (let ([string (eatWhitespaceAndComments string)])
          (if (== 0 (Builtin.strlen string))
              (Util.list "eof" string)
@@ -159,7 +169,7 @@
                  [(isDelimiter c) (Util.list c (Builtin.slice string 1))]
                  [(isIdenStart c) (lexIden string)]
                  [(isDigit c) (lexNumber string)]
-                 [(isOp c) (lexOp string)]
+                 [(isOpchar c) (lexOp string)]
                  [(== c "\"") (lexStringContents "" (Builtin.slice string 1))]
                  [else (Builtin.error (Util.list "lex: unexpected character:" c))]))))))
 
@@ -169,7 +179,7 @@
 
   (= lexIden
      (lambda (string)
-       (let* ([idx (seekWhile isIden string)]
+       (let* ([idx (seekWhile isIdenChar string)]
               [prefix (Builtin.slice string 0 idx)]
               [suffix (Builtin.slice string idx)]
               [tok (if (isKeyword prefix)
@@ -179,7 +189,7 @@
 
   (= lexNumber
      (lambda (string)
-       (let* ([idx (seekWhile isIden string)]
+       (let* ([idx (seekWhile isIdenChar string)]
               [prefix (Builtin.slice string 0 idx)]
               [suffix (Builtin.slice string idx)]
               [tok (Num prefix)])
@@ -198,7 +208,7 @@
          (Util.list tok suffix))))
 
   (= lexStringContents
-     (lambda (prefix string) ; [token, string]
+     (lambda (prefix string)            ; [token, string]
        ; TODO get characters one by one, interpreting escapes; stop at doublequote.
        (let* ([idx (seekWhile (lambda (c)
                                 (not (or (== c "\"")
@@ -215,7 +225,7 @@
                  [else (Builtin.error (Util.list "no case in lexStringContents for" c))]))))))
 
   (= eatWhitespaceAndComments
-     (lambda (string) ; -> string
+     (lambda (string)                   ; -> string
        (if (== 0 (Builtin.strlen string))
            string
            (let ([c (Builtin.slice string 0 1)])
@@ -249,6 +259,113 @@
   .   - if open paren: parse the args, then parseCall
 
   |#
+
+  ; Lexer.lex : string -> [token-or-eof, string]
+  (= == Builtin.==)
+  (= list Util.list)
+  (= first Builtin.first)
+  (= second Util.second)
+
+  (= peek (lambda (string) (first (Lexer.lex string))))
+  (= expect (lambda (tok string)        ; -> string
+              (let ([(tok2 string) (Lexer.lex string)])
+                (if (== tok tok2)
+                    string
+                    (Builtin.error (list "expected" tok "but got" tok2))))))
+
+  (= parseProgram
+     (lambda (string)                   ; -> listof def-or-expr
+       (if (== "eof" (peek string))
+           '()
+           (let ([{def string} (parseDef string)])
+             (Builtin.link def
+                           (parseProgram string))))))
+
+  (= parseDef
+     (lambda (string)                   ; -> [def-or-expr, string]
+       (let* ([_ (Builtin.debug "GAH")]
+              [_ (Builtin.debug string)]
+              [{expr string} (Builtin.debug (parseExpr string))])
+         (if (== "=" (peek string))
+             ; parse another expr
+             (let* ([_ (Builtin.debug "GAH 2")]
+                    [{expr2 string} (Builtin.debug (Lexer.lex string))])
+               (list (Syntax.pack #'Syntax.Def (list expr expr2))
+                     string))
+             ; just do this one
+             (list expr string)))))
+
+  (= parseExpr
+     (lambda (string)                   ; -> [expr, string]
+       (let ([tok (peek string)])
+         (cond
+           [(== tok "if") (parseIf string)]
+           [(== tok "fn") (parseFn string)]
+           [else (parseCall string)]))))
+
+  (= parseIf
+     (lambda (s)                        ; -> [expr, string]
+       (let* ([s         (expect "if")]
+              [{test s}  (parseExpr s)]
+              [s         (expect "then")]
+              [{consq s} (parseExpr s)]
+              [s         (expect "else")]
+              [{alt s}   (parseExpr s)])
+         (list (Syntax.pack #'Syntax.If (list test consq alt))
+               s))))
+
+  (= parseFn
+     (lambda (s)                        ; -> [expr, string]
+       (let* ([s (expect "fn" s)]
+              [{params s} (parseCommaSepExpr s)]
+              [s (expect "->" s)]
+              [{body s} (parseExpr s)])
+         (list (Syntax.pack #'Syntax.Func (list params body))
+               s))))
+
+  (= parseCall
+     (lambda (s)
+       (let* ([{head s} (parseAtom s)]
+              [tok (peek s)])
+         (cond
+           [(== tok "(") foo]
+           ))))
+  (= parseCallLoop
+     (lambda (callee s)
+       (let ([tok (peek s)])
+         (if (== tok "(")
+             (let ([{args s} (parseArgs s)])
+               (parseCallLoop (Syntax.pack #'Syntax.Call (list callee args))
+                              s))
+             (list callee s)))))
+  (= parseArgs
+     (lambda (s)
+       ; TODO handle any number of args
+       (let* ([s (expect "(")]
+              [{e s} (parseExpr s)]
+              [s (expect ")")])
+         (list e s))))
+
+  (= parseAtom
+     (lambda (s)
+       (let ([tok (peek s)])
+         (cond
+           [(== tok "(") (parseParen s)]
+           [(Lexer.isIden tok) (let ([{name} (Builtin.untag #'Lexer.Iden tok)])
+                                 (Syntax.pack #'Syntax.Local
+                                              (list name -1)))]
+           ;; [(isNum tok) ] ;; TODO make Num hold a bignum, not string
+           ;; TODO do string literals
+           ))))
+
+  (= parseParen
+     (lambda (string)                   ; -> [expr, string]
+       (let* ([string (expect "(")]
+              [(e string) (parseExpr string)])
+         (list e (expect ")")))))
+
+
+  ;;
   )
 
 (module Loader

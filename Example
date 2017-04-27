@@ -1,9 +1,11 @@
 (module Example
     #;()
 
+  (Builtin.debug "HELLO")
   (Builtin.debug ExampleLib.msg)
 
-  (Builtin.debug (Lexer.lexAll "f(asdf,wer)"))
+  ;(Builtin.debug (Lexer.lexAll "f(asdf,wer)"))
 
+  (Builtin.debug (Parser.parseProgram "f(asdf,wer)"))
 
   )

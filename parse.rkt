@@ -42,6 +42,7 @@ Limitations of this parser:
       [`(lambda ,@_) (error (format "bad lambda form: ~v" form))]
 
       ; macros / syntax sugar
+      [`(let ([(,lhs ...) ,rhs]) ,body) (r `(Builtin.apply (lambda ,lhs ,body) ,rhs))]
       [`(let ([,lhs ,rhs] ...) ,body) (r `((lambda ,lhs ,body) ,@rhs))]
       [`(let ,@_) (error (format "bad let form: ~v" form))]
       [`(let* ([,lhs ,rhs] ...) ,body) (r (foldr (lambda (l r b) `(let ([,l ,r]) ,b))
@@ -117,11 +118,13 @@ Limitations of this parser:
                 (Module 'q (list (Def (Global 'q 'x) (Global 'q 'y)))))
   (check-equal? (parse '(let ([x 1] [y 2]) z))
                 (parse '((lambda (x y) z) 1 2)))
+  (check-equal? (parse '(let ([{x y} z]) b))
+                (parse '(Builtin.apply (lambda (x y) b) z)))
   (check-equal? (parse '(let* ([x 1] [y 2]) z))
                 (parse '(let ([x 1]) (let ([y 2]) z))))
   (check-equal? (parse '(cond [1 2] [3 4] [else 5]))
                 (parse '(if 1 2 (if 3 4 5))))
   (check-equal? (parse '(cond [1 2] [3 4]))
-                (parse '(if 1 2 (if 3 4 (error "no case")))))
+                (parse '(if 1 2 (if 3 4 (Builtin.error "no case")))))
   (check-equal? (parse '(begin 1 2 3))
                 (parse '(let* ([_ 1] [_ 2]) 3))))

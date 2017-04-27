@@ -39,7 +39,7 @@
              'link cons
              'first first
              'rest rest
-             'debug displayln
+             'debug (lambda (x) (begin (displayln x) x))
              'apply apply
              'makeVariadic (lambda (f) (lambda args (f args)))
              'error (lambda (msg) (error (~a msg)))
@@ -55,7 +55,25 @@
              'ord (lambda (s) (match (string->list s) [(list c) (char->integer c)]))
              'chr (lambda (i) (list->string (list (integer->char i)))))))
 
-(define (Syntax.unpack tag ast)
+(define/contract (Syntax.pack tag args) (-> Global? list? Syntax?)
+  (match-define (Global mod name) tag)
+  (unless (equal? 'Syntax mod)
+    (error 'Syntax.pack "not a syntax ID: ~v" tag))
+  (define sym string->symbol)
+  (match name
+    ['Module (match args [(list modname statements) (Module (sym modname) statements)])]
+    ['Using (match args [(list modname) (Using (sym modname))])]
+    ['Def (apply Def args)]
+    ['Lit (apply Lit args)]
+    ['Quote (apply Quote args)]
+    ['Local (match args [(list name num) (Local (sym name) num)])]
+    ['Global (apply Global (map sym args))]
+    ['Func (apply Func args)]
+    ['Call (apply Call args)]
+    ['If (apply If args)]
+    [_ (error 'Syntax.pack "not a syntax ID: ~v" tag)]))
+
+(define/contract (Syntax.unpack tag ast) (-> Global? Syntax? (or/c #f list?))
   ; TODO unify this with Builtin.apply
   (define (tag? name) (equal? tag (Global 'Syntax name)))
   (define (unsymbol v) (if (symbol? v) (symbol->string v) v))
@@ -79,7 +97,8 @@
 
 (define (make-syntax-module)
   (Mod 'Syntax
-       (hash 'unpack Syntax.unpack)
+       (hash 'pack Syntax.pack
+             'unpack Syntax.unpack)
        ))
 
 (define (run-toplevel! in)
@@ -94,9 +113,11 @@
     (match (parse form)
       [(? Module? ast) (let ([m (eval ast modstore)])
                          (hash-set! modstore (Mod-name m) m)
-                         (displayln (format "module: ~v" m)))]
+                         ;(displayln (format "module: ~v" m))
+                         (void))]
       [ast (let ([v (eval ast modstore)])
-             (displayln (format "value: ~v" v)))])))
+             ;(displayln (format "value: ~v" v))
+             (void))])))
 
 ;;(define (embed-mod mod-val)) ; -> DefMod
 (module+ main

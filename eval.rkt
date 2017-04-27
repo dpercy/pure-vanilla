@@ -32,7 +32,7 @@ Limitations of this simple evaluator:
                                 (lambda ()
                                   (error 'eval "module ~a doesn't define ~a" mn name)))))])
        ,core-expr))
-  (displayln (list 'compiled core-expr))
+  ;(displayln (list 'compiled core-expr))
   (racket:eval (datum->syntax #'() wrapped-expr)))
 
 (define (compile expr)
