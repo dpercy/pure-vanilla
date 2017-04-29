@@ -267,6 +267,7 @@
   (= second Util.second)
 
   (= peek (lambda (string) (first (Lexer.lex string))))
+  (= skip (lambda (string) (second (Lexer.lex string))))
   (= expect (lambda (tok string)        ; -> string
               (let ([(tok2 string) (Lexer.lex string)])
                 (if (== tok tok2)
@@ -283,13 +284,10 @@
 
   (= parseDef
      (lambda (string)                   ; -> [def-or-expr, string]
-       (let* ([_ (Builtin.debug "GAH")]
-              [_ (Builtin.debug string)]
-              [{expr string} (Builtin.debug (parseExpr string))])
+       (let ([{expr string} (parseExpr string)])
          (if (== "=" (peek string))
              ; parse another expr
-             (let* ([_ (Builtin.debug "GAH 2")]
-                    [{expr2 string} (Builtin.debug (Lexer.lex string))])
+             (let ([{expr2 string} (Lexer.lex string)])
                (list (Syntax.pack #'Syntax.Def (list expr expr2))
                      string))
              ; just do this one
@@ -305,11 +303,11 @@
 
   (= parseIf
      (lambda (s)                        ; -> [expr, string]
-       (let* ([s         (expect "if")]
+       (let* ([s         (expect "if" s)]
               [{test s}  (parseExpr s)]
-              [s         (expect "then")]
+              [s         (expect "then" s)]
               [{consq s} (parseExpr s)]
-              [s         (expect "else")]
+              [s         (expect "else" )]
               [{alt s}   (parseExpr s)])
          (list (Syntax.pack #'Syntax.If (list test consq alt))
                s))))
@@ -325,26 +323,32 @@
 
   (= parseCall
      (lambda (s)
-       (let* ([{head s} (parseAtom s)]
-              [tok (peek s)])
-         (cond
-           [(== tok "(") foo]
-           ))))
+       (let ([{head s} (parseAtom s)])
+         (parseCallLoop head s))))
   (= parseCallLoop
      (lambda (callee s)
        (let ([tok (peek s)])
          (if (== tok "(")
-             (let ([{args s} (parseArgs s)])
+             (let ([{args s} (parseParenArgs s)])
                (parseCallLoop (Syntax.pack #'Syntax.Call (list callee args))
                               s))
              (list callee s)))))
+  (= parseParenArgs
+     (lambda (s)
+       (let* ([s (expect "(" s)]
+              [{es s} (parseArgs s)]
+              [s (expect ")" s)])
+         (list es s))))
   (= parseArgs
      (lambda (s)
-       ; TODO handle any number of args
-       (let* ([s (expect "(")]
-              [{e s} (parseExpr s)]
-              [s (expect ")")])
-         (list e s))))
+       (if (== (peek s) ")")
+           (list '() s)
+           (let ([{e s} (parseExpr s)])
+             (if (== (peek s) ")")
+                 (list (list e) s)
+                 (let* ([s (expect "," s)]
+                        [{rest s} (parseArgs s)])
+                   (list (Builtin.link e rest) s)))))))
 
   (= parseAtom
      (lambda (s)
@@ -352,17 +356,17 @@
          (cond
            [(== tok "(") (parseParen s)]
            [(Lexer.isIden tok) (let ([{name} (Builtin.untag #'Lexer.Iden tok)])
-                                 (Syntax.pack #'Syntax.Local
-                                              (list name -1)))]
+                                 (list (Syntax.pack #'Syntax.Local (list name -1))
+                                       (skip s)))]
            ;; [(isNum tok) ] ;; TODO make Num hold a bignum, not string
            ;; TODO do string literals
            ))))
 
   (= parseParen
      (lambda (string)                   ; -> [expr, string]
-       (let* ([string (expect "(")]
+       (let* ([string (expect "(" s)]
               [(e string) (parseExpr string)])
-         (list e (expect ")")))))
+         (list e (expect ")" s)))))
 
 
   ;;
