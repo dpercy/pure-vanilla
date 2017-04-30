@@ -107,7 +107,7 @@
 
   (= Iden (makeConstructor1 #'Iden)) ; holds the iden as a string, like "myIden123"
   (= Op   (makeConstructor1 #'Op)) ; holds the iden as a string, like "<"
-  (= Num  (makeConstructor1 #'Num)) ; holds the number as a string, like "123"
+  (= Num  (makeConstructor1 #'Num)) ; holds the number value, like 123, NOT "123"
   (= Str  (makeConstructor1 #'Str)) ; holds the *value* of the string, like "\t"; NOT "\"\\t\""
 
   (= isIden (makePredicate #'Iden))
@@ -119,13 +119,15 @@
   (= < Builtin.<)
   (= <= Util.<=)
   (= + Builtin.+)
+  (= - Builtin.-)
+  (= * Builtin.*)
   (= == Builtin.==)
 
   (= delimiters (Util.explode "()[]{},;\n"))
   (= isDelimiter (lambda (c) (Util.contains delimiters c)))
 
   (= opchars (Util.explode "~!@$%^&*_-+=:<>/?"))
-  (= isOpchar (lambda (c) (Util.contains ops c)))
+  (= isOpchar (lambda (c) (Util.contains opchars c)))
 
   (= isDigit (lambda (c) (and (<= (ord "0") (ord c)) (<= (ord c) (ord "9")))))
   (= isLower (lambda (c) (and (<= (ord "a") (ord c)) (<= (ord c) (ord "z")))))
@@ -192,10 +194,18 @@
        (let* ([idx (seekWhile isIdenChar string)]
               [prefix (Builtin.slice string 0 idx)]
               [suffix (Builtin.slice string idx)]
-              [tok (Num prefix)])
+              [tok (Num (intOfString prefix))])
          ; leave the number as a string because the toplevel implementation
          ; might not support very wide integers
          (Util.list tok suffix))))
+  (= intOfString
+     (lambda (string)
+       (if (== (Builtin.strlen string) 0)
+           0
+           (let ([last (Builtin.slice string (- (Builtin.strlen string) 1) (Builtin.strlen string))]
+                 [butlast (Builtin.slice string 0 (- (Builtin.strlen string) 1))])
+             (+ (- (ord last) (ord "0"))
+                (* 10 (intOfString butlast)))))))
 
   (= lexOp
      (lambda (string)
@@ -211,15 +221,16 @@
      (lambda (prefix string)            ; [token, string]
        ; TODO get characters one by one, interpreting escapes; stop at doublequote.
        (let* ([idx (seekWhile (lambda (c)
-                                (not (or (== c "\"")
-                                         (== c "\\")))))])
+                                (Util.not (or (== c "\"")
+                                              (== c "\\"))))
+                              string)])
          (if (== (Builtin.strlen string) idx)
              (Builtin.error "lex: unexpected newline in string")
              (let ([c (Builtin.slice string idx (+ idx 1))])
                (cond
                  [(== c "\"") (let* ([beforeQuote (Builtin.slice string 0 idx)]
                                      [afterQuote (Builtin.slice string (+ idx 1))]
-                                     [s (strcat prefix beforeQuote)])
+                                     [s (Builtin.strcat prefix beforeQuote)])
                                 (Util.list (Str s) afterQuote))]
                  [(== c "\\") (Builtin.error "TODO interpret escapes")]
                  [else (Builtin.error (Util.list "no case in lexStringContents for" c))]))))))
@@ -232,7 +243,7 @@
              (cond
                [(== c " ") (eatWhitespaceAndComments (Builtin.slice string 1))]
                [(== c "\t") (eatWhitespaceAndComments (Builtin.slice string 1))]
-               [(== c "#") (let ([idx (seekWhile (lambda (c) (not (== "\n" c)))
+               [(== c "#") (let ([idx (seekWhile (lambda (c) (Util.not (== "\n" c)))
                                                  string)])
                              (eatWhitespaceAndComments (Builtin.slice string idx)))]
                [else string]))))))
@@ -358,9 +369,13 @@
            [(Lexer.isIden tok) (let ([{name} (Builtin.untag #'Lexer.Iden tok)])
                                  (list (Syntax.pack #'Syntax.Local (list name -1))
                                        (skip s)))]
-           ;; [(isNum tok) ] ;; TODO make Num hold a bignum, not string
-           ;; TODO do string literals
-           ))))
+           [(Lexer.isNum tok) (let ([{val} (Builtin.untag #'Lexer.Num tok)])
+                                (list (Syntax.pack #'Syntax.Lit (list val))
+                                      (skip s)))]
+           [(Lexer.isStr tok) (let ([{val} (Builtin.untag #'Lexer.Str tok)])
+                                (list (Syntax.pack #'Syntax.Lit (list val))
+                                      (skip s)))]
+           [else (Builtin.error (list "no case in parseAtom" tok))]))))
 
   (= parseParen
      (lambda (string)                   ; -> [expr, string]

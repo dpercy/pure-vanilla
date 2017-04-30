@@ -48,6 +48,8 @@
              '== equal?
              '< <
              '+ +
+             '- -
+             '* *
              'void void
              'strlen string-length
              'strcat string-append

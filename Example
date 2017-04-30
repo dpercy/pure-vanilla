@@ -6,6 +6,6 @@
 
   ;(Builtin.debug (Lexer.lexAll "f(asdf,wer)"))
 
-  (Builtin.debug (Parser.parseProgram "f(asdf,wer)"))
+  (Builtin.debug (Parser.parseProgram "f(asdf,g(), 123, \"neato\")"))
 
   )
