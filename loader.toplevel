@@ -25,15 +25,15 @@
   (= <= (lambda (x y) (>= y x)))
 
   (= cases
-     (lambda (ast handlers)
+     (lambda (msg ast handlers)
        (if (Builtin.isEmpty handlers)
-           (Builtin.error (Util.list "no case for ast" ast))
+           (Builtin.error (Util.list "no case in" msg "for ast" ast))
            (let* ([tag (Builtin.first (Builtin.first handlers))]
                   [handler (second (Builtin.first handlers))]
                   [unpacked (Builtin.untag tag ast)])
              (if unpacked
                  (Builtin.apply handler unpacked)
-                 (cases ast (Builtin.rest handlers)))))))
+                 (cases msg ast (Builtin.rest handlers)))))))
   (= hasTag (lambda (v tag)
               (not (Builtin.== #false (Builtin.untag tag v)))))
 
@@ -422,8 +422,8 @@
   (= verifyModule
      (lambda (ast)
        (Util.cases
-        (let ([_ (Builtin.debug "outer cases in verifyModule")])
-          ast)
+        "outer cases in verifyModule"
+        ast
         ; unbound locals
         ; defs match the modname
         ; duplicate defs and params
@@ -445,8 +445,8 @@
                                 (Util.map
                                  (lambda (lhs)
                                    (Util.cases
-                                    (let ([_ (Builtin.debug "inner cases in verifyModule")])
-                                      lhs)
+                                    "inner cases in verifyModule"
+                                    lhs
                                     (Util.list (Util.list #'Syntax.Global
                                                           (lambda (mod name)
                                                             ; - check modname matches
@@ -468,8 +468,8 @@
      (lambda (ast env) ; env : listof local
        (let ([r (lambda (ast) (verifyExpr ast env))])
          (Util.cases
-          (let ([_ (Builtin.debug "cases in verifyExpr")])
-            ast)
+          "cases in verifyExpr"
+          ast
           (Util.list
            (Util.list #'Syntax.Module (lambda (modname statements)
                                         (Builtin.error (Util.list "not an expression:" ast))))
@@ -509,10 +509,11 @@
                                       (r alt)))))))))
   (= getLocalName
      (lambda (param)
-       (Util.cases (let ([_ (Builtin.debug "cases in getLocalName")])
-                     param)
-                   (Util.list (Util.list #'Syntax.Local
-                                         (lambda (name num) name))))))
+       (Util.cases
+        "cases in getLocalName"
+        param
+        (Util.list (Util.list #'Syntax.Local
+                              (lambda (name num) name))))))
   (= verifyDistinct
      (lambda (names)
        (cond
@@ -526,8 +527,8 @@
   (= scan
      (lambda (ast) ; -> list of
        (Util.cases
-        (let ([_ (Builtin.debug "cases in scan")])
-          ast)
+        "cases in scan"
+        ast
         (Util.list
          (Util.list #'Syntax.Global (lambda (mod name) (Util.list mod)))
          (Util.list #'Syntax.Module (lambda (modname statements) (scanMany statements)))
