@@ -402,22 +402,20 @@
        (runModuleHelper modname '())))
   (= runModuleHelper
      (lambda (modname seen)
-       (let ([_ (Builtin.debug (Util.list "runModuleHelper" modname seen))])
-         (cond
-           [(System.moduleExists modname) "already exists"]
-           [(Util.contains seen modname) (Builtin.error (Util.list "cyclic module dependency:" seen))]
-           [else
-            ; interpret modname as a filename
-            (let* ([text (System.readFile modname)]
-                   [ast (System.parse text)]
-                   [_ (verifyModule ast)]
-                   [deps (Util.remove modname (scan ast))]
-                   [_ (Builtin.debug (Util.list "deps for" modname "are" deps))]
-                   [_ (let* ([seen (Builtin.link modname seen)]
-                             [runModule (lambda (modname) (runModuleHelper modname seen))])
-                        (Util.foreach runModule deps))]
-                   [mod (System.eval ast)])
-              (System.registerModule mod))]))))
+       (cond
+         [(System.moduleExists modname) "already exists"]
+         [(Util.contains seen modname) (Builtin.error (Util.list "cyclic module dependency:" seen))]
+         [else
+          ; interpret modname as a filename
+          (let* ([text (System.readFile modname)]
+                 [ast (System.parse text)]
+                 [_ (verifyModule ast)]
+                 [deps (Util.remove modname (scan ast))]
+                 [_ (let* ([seen (Builtin.link modname seen)]
+                           [runModule (lambda (modname) (runModuleHelper modname seen))])
+                      (Util.foreach runModule deps))]
+                 [mod (System.eval ast)])
+            (System.registerModule mod))])))
 
   (= verifyModule
      (lambda (ast)
