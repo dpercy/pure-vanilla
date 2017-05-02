@@ -30,12 +30,12 @@
            (Builtin.error (Util.list "no case for ast" ast))
            (let* ([tag (Builtin.first (Builtin.first handlers))]
                   [handler (second (Builtin.first handlers))]
-                  [unpacked (Syntax.unpack tag ast)])
+                  [unpacked (Builtin.untag tag ast)])
              (if unpacked
                  (Builtin.apply handler unpacked)
                  (cases ast (Builtin.rest handlers)))))))
   (= hasTag (lambda (v tag)
-              (not (Builtin.== #false (Syntax.unpack tag v)))))
+              (not (Builtin.== #false (Builtin.untag tag v)))))
 
   (= foldr (lambda (f base lst)
              (if (Builtin.isEmpty lst)
@@ -306,7 +306,7 @@
          (if (== "=" (peek string))
              ; parse another expr
              (let ([{expr2 string} (Lexer.lex string)])
-               (list (Syntax.pack #'Syntax.Def (list expr expr2))
+               (list (Builtin.tag #'Syntax.Def (list expr expr2))
                      string))
              ; just do this one
              (list expr string)))))
@@ -327,7 +327,7 @@
               [{consq s} (parseExpr s)]
               [s         (expect "else" )]
               [{alt s}   (parseExpr s)])
-         (list (Syntax.pack #'Syntax.If (list test consq alt))
+         (list (Builtin.tag #'Syntax.If (list test consq alt))
                s))))
 
   (= parseFn
@@ -336,7 +336,7 @@
               [{params s} (parseCommaSepExpr s)]
               [s (expect "->" s)]
               [{body s} (parseExpr s)])
-         (list (Syntax.pack #'Syntax.Func (list params body))
+         (list (Builtin.tag #'Syntax.Func (list params body))
                s))))
 
   (= parseCall
@@ -348,7 +348,7 @@
        (let ([tok (peek s)])
          (if (== tok "(")
              (let ([{args s} (parseParenArgs s)])
-               (parseCallLoop (Syntax.pack #'Syntax.Call (list callee args))
+               (parseCallLoop (Builtin.tag #'Syntax.Call (list callee args))
                               s))
              (list callee s)))))
   (= parseParenArgs
@@ -374,13 +374,13 @@
          (cond
            [(== tok "(") (parseParen s)]
            [(Lexer.isIden tok) (let ([{name} (Builtin.untag #'Lexer.Iden tok)])
-                                 (list (Syntax.pack #'Syntax.Local (list name -1))
+                                 (list (Builtin.tag #'Syntax.Local (list name -1))
                                        (skip s)))]
            [(Lexer.isNum tok) (let ([{val} (Builtin.untag #'Lexer.Num tok)])
-                                (list (Syntax.pack #'Syntax.Lit (list val))
+                                (list (Builtin.tag #'Syntax.Lit (list val))
                                       (skip s)))]
            [(Lexer.isStr tok) (let ([{val} (Builtin.untag #'Lexer.Str tok)])
-                                (list (Syntax.pack #'Syntax.Lit (list val))
+                                (list (Builtin.tag #'Syntax.Lit (list val))
                                       (skip s)))]
            [else (Builtin.error (list "no case in parseAtom" tok))]))))
 
@@ -422,7 +422,8 @@
   (= verifyModule
      (lambda (ast)
        (Util.cases
-        ast
+        (let ([_ (Builtin.debug "outer cases in verifyModule")])
+          ast)
         ; unbound locals
         ; defs match the modname
         ; duplicate defs and params
@@ -433,7 +434,7 @@
                       (begin
                         (let* ([lhses (Util.map
                                        (lambda (stmt)
-                                         (let ([unpacked (Syntax.unpack #'Syntax.Def stmt)])
+                                         (let ([unpacked (Builtin.untag #'Syntax.Def stmt)])
                                            (if unpacked
                                                (Builtin.first unpacked)
                                                #false)))
@@ -444,7 +445,8 @@
                                 (Util.map
                                  (lambda (lhs)
                                    (Util.cases
-                                    lhs
+                                    (let ([_ (Builtin.debug "inner cases in verifyModule")])
+                                      lhs)
                                     (Util.list (Util.list #'Syntax.Global
                                                           (lambda (mod name)
                                                             ; - check modname matches
@@ -456,7 +458,7 @@
                           (verifyDistinct lhsNames))
                         (let ([exprs (Util.map
                                       (lambda (stmt)
-                                        (let ([unpacked (Syntax.unpack #'Syntax.Def stmt)])
+                                        (let ([unpacked (Builtin.untag #'Syntax.Def stmt)])
                                           (if unpacked
                                               (Util.second unpacked)
                                               stmt)))
@@ -466,7 +468,8 @@
      (lambda (ast env) ; env : listof local
        (let ([r (lambda (ast) (verifyExpr ast env))])
          (Util.cases
-          ast
+          (let ([_ (Builtin.debug "cases in verifyExpr")])
+            ast)
           (Util.list
            (Util.list #'Syntax.Module (lambda (modname statements)
                                         (Builtin.error (Util.list "not an expression:" ast))))
@@ -506,7 +509,8 @@
                                       (r alt)))))))))
   (= getLocalName
      (lambda (param)
-       (Util.cases param
+       (Util.cases (let ([_ (Builtin.debug "cases in getLocalName")])
+                     param)
                    (Util.list (Util.list #'Syntax.Local
                                          (lambda (name num) name))))))
   (= verifyDistinct
@@ -522,7 +526,8 @@
   (= scan
      (lambda (ast) ; -> list of
        (Util.cases
-        ast
+        (let ([_ (Builtin.debug "cases in scan")])
+          ast)
         (Util.list
          (Util.list #'Syntax.Global (lambda (mod name) (Util.list mod)))
          (Util.list #'Syntax.Module (lambda (modname statements) (scanMany statements)))
