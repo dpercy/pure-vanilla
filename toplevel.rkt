@@ -5,6 +5,7 @@
 (require "ast.rkt"
          "parse.rkt"
          "eval.rkt"
+         "constructor.rkt"
          (only-in 2htdp/batch-io read-file))
 
 (define (make-system-module modstore)
@@ -24,14 +25,6 @@
                              (hash-has-key? modstore (string->symbol mn)))
              'getArgs (lambda ()
                         (vector->list (current-command-line-arguments))))))
-
-(struct Tagged (tag values) #:transparent)
-(define/contract (tag t args) (-> Global? list? Tagged?)
-  (Tagged t args))
-(define/contract (untag t v) (-> Global? Tagged? (or/c #false list?))
-  (if (equal? t (Tagged-tag v))
-      (Tagged-values v)
-      #false))
 
 (define (make-builtin-module)
   (Mod 'Builtin

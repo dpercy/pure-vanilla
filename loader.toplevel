@@ -269,6 +269,13 @@
   .  peek:
   .   - if open paren: parse the args, then parseCall
 
+
+  ; TODO fixScope in userspace? or reuse builtin fixscope.
+  ;  - or, smart constructors automatically alpha-normalize things?
+  ;      - moves complexity into the constructor...
+  ;  - flip side is: unpack automatically chooses a unique name?
+  ;      - only needs to avoid colliding with existing free vars in that term
+
   |#
 
   ; Lexer.lex : string -> [token-or-eof, string]

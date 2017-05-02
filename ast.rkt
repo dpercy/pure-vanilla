@@ -1,24 +1,35 @@
 #lang racket
 
+(provide (all-defined-out)
+         (struct-out Global))
 
-(provide (all-defined-out))
+(require "constructor.rkt")
 
-(struct Syntax () #:prefab)
+(tag-struct "Syntax" (Module modname statements))
 
-(struct Module Syntax (modname statements) #:prefab)
+(tag-struct "Syntax" (Using modname))
+(tag-struct "Syntax" (Def var expr))
 
-(struct Using Syntax (modname) #:prefab)
-(struct Def Syntax (var expr) #:prefab)
-
-(struct Lit Syntax (value) #:prefab)
-(struct Quote Syntax (ast) #:prefab)
+(tag-struct "Syntax" (Lit value))
+(tag-struct "Syntax" (Quote ast))
 
 ; `number` is not a De-Bruijn index or up-reference:
 ; it's an extension of the variable's name.
 ; Two locals are equal iff their `name` and `number` are equal.
-(struct Local Syntax (name number) #:prefab)
-(struct Global Syntax (mod name) #:prefab)
+(tag-struct "Syntax" (Local name number))
 
-(struct Func Syntax (params body) #:prefab)
-(struct Call Syntax (func args) #:prefab)
-(struct If Syntax (test consq alt) #:prefab)
+(tag-struct "Syntax" (Func params body))
+(tag-struct "Syntax" (Call func args))
+(tag-struct "Syntax" (If test consq alt))
+
+(define (Syntax? v)
+  (or (Global? v)
+      Module?
+      Using?
+      Def?
+      Lit?
+      Quote?
+      Local?
+      Func?
+      Call?
+      If?))

@@ -8,4 +8,13 @@
 
   (Builtin.debug (Parser.parseProgram "f(asdf,g(), 123, \"neato\")"))
 
+  #;
+  (Builtin.debug (Builtin.== (Parser.parseProgram "f(asdf,g(), 123, \"neato\")")
+                             #'(f asdf (g) 123 "neato")))
+
+  (Builtin.debug (Builtin.== #'(f asdf (g) 123 "neato")
+                             #'(f asdf (g) 123 "neato")))
+
+
+  ;;
   )
