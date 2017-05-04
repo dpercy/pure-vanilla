@@ -219,7 +219,6 @@
 
   (= lexStringContents
      (lambda (prefix string)            ; [token, string]
-       ; TODO get characters one by one, interpreting escapes; stop at doublequote.
        (let* ([idx (seekWhile (lambda (c)
                                 (Util.not (or (== c "\"")
                                               (== c "\\"))))
