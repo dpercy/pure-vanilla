@@ -4,16 +4,17 @@
   (Builtin.debug "HELLO")
   (Builtin.debug ExampleLib.msg)
 
-  ;(Builtin.debug (Lexer.lexAll "f(asdf,wer)"))
+  (= prog "fn(f, g) -> f(asdf,g(), 123, \"neato\")")
+  (Builtin.debug (Lexer.lexAll prog))
 
-  (Builtin.debug (Parser.parseProgram "f(asdf,g(), 123, \"neato\")"))
+  (= ast (Builtin.first (Parser.parseProgram (Scope.setModname Scope.emptyScope "Example")
+                                             prog)))
+  (Builtin.debug ast)
 
-  #;
-  (Builtin.debug (Builtin.== (Parser.parseProgram "f(asdf,g(), 123, \"neato\")")
-                             #'(f asdf (g) 123 "neato")))
+  (= ast2 #'(lambda (f g) (f asdf (g) 123 "neato")))
+  (Builtin.debug ast2)
 
-  (Builtin.debug (Builtin.== #'(f asdf (g) 123 "neato")
-                             #'(f asdf (g) 123 "neato")))
+  (Builtin.debug (Builtin.== ast ast2))
 
 
   ;;

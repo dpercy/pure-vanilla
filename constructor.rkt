@@ -14,7 +14,7 @@
       (apply Global args)
       (Tagged t args)))
 
-(define/contract (untag t v) (-> Global? (or/c Global? Tagged?) (or/c #false list?))
+(define/contract (untag t v) (-> Global? any/c (or/c #false list?))
   (cond
     [(and (Global? v)
           (equal? t (Global "Syntax" "Global")))  (list (Global-mod v)

@@ -24,6 +24,12 @@
   (= >= (lambda (x y) (not (Builtin.< x y))))
   (= <= (lambda (x y) (>= y x)))
 
+  (= length
+     (lambda (lst)
+       (if (Builtin.isEmpty lst)
+           0
+           (Builtin.+ 1 (length (Builtin.rest lst))))))
+
   (= cases
      (lambda (msg ast handlers)
        (if (Builtin.isEmpty handlers)
@@ -52,6 +58,9 @@
                   (if (pred (Builtin.first lst))
                       (Builtin.link (Builtin.first lst) (filter pred (Builtin.rest lst)))
                       (filter pred (Builtin.rest lst))))))
+
+  (= count (lambda (pred lst)
+             (length (filter pred lst))))
 
   (= remove (lambda (elem lst)
               (filter (lambda (x) (if (Builtin.== elem x) #false #true)) lst)))
@@ -209,7 +218,7 @@
 
   (= lexOp
      (lambda (string)
-       (let* ([idx (seekWhile isOp string)]
+       (let* ([idx (seekWhile isOpchar string)]
               [prefix (Builtin.slice string 0 idx)]
               [suffix (Builtin.slice string idx)]
               [tok (if (isKeyword prefix)
@@ -247,6 +256,32 @@
                              (eatWhitespaceAndComments (Builtin.slice string idx)))]
                [else string]))))))
 
+(module Scope
+    #;()
+  (= Scope #'Scope.Scope)
+  (= emptyScope (Builtin.tag Scope (Util.list #false '())))
+  ; left value of a scope is the current module name, or false
+  ; right value is a list of bound names
+
+  (= setModname (lambda (scope modname)
+                  (let ([{_ bound} (Builtin.untag Scope scope)])
+                    (Builtin.tag Scope (Util.list modname bound)))))
+  (= getModname (lambda (scope)
+                  (let ([{mn _} (Builtin.untag Scope scope)])
+                    mn)))
+
+  (= add (lambda (name scope)
+           (let ([{mn bound} (Builtin.untag Scope scope)])
+             (Builtin.tag Scope (Util.list mn (Builtin.link name bound))))))
+  (= lookup (lambda (scope)
+              (lambda (name)
+                (let* ([{mn bound} (Builtin.untag Scope scope)]
+                       [numBound (Util.count (lambda (b) (Builtin.== b name))
+                                             bound)])
+                  (if (Builtin.== 0 numBound)
+                      (Builtin.tag #'Syntax.Global (Util.list mn name))
+                      (Builtin.tag #'Syntax.Local (Util.list name (Builtin.- numBound 1)))))))))
+
 (module Parser
     #;()
 
@@ -268,12 +303,11 @@
   .  peek:
   .   - if open paren: parse the args, then parseCall
 
-
-  ; TODO fixScope in userspace? or reuse builtin fixscope.
-  ;  - or, smart constructors automatically alpha-normalize things?
-  ;      - moves complexity into the constructor...
-  ;  - flip side is: unpack automatically chooses a unique name?
-  ;      - only needs to avoid colliding with existing free vars in that term
+  ; TODO fixscope in this parser
+  ;   - variables get renamed by shadowing
+  ; TODO try to bootstrap the parser!
+  ;   - transcribe this file into the new syntax
+  ;   - serialize this file as JSON
 
   |#
 
@@ -292,16 +326,16 @@
                     (Builtin.error (list "expected" tok "but got" tok2))))))
 
   (= parseProgram
-     (lambda (string)                   ; -> listof def-or-expr
+     (lambda (scope string)                   ; -> listof def-or-expr
        (if (== "eof" (peek string))
            '()
-           (let ([{def string} (parseDef string)])
+           (let ([{def string} (parseDef scope string)])
              (Builtin.link def
-                           (parseProgram string))))))
+                           (parseProgram scope string))))))
 
   (= parseDef
-     (lambda (string)                   ; -> [def-or-expr, string]
-       (let ([{expr string} (parseExpr string)])
+     (lambda (scope string)                   ; -> [def-or-expr, string]
+       (let ([{expr string} (parseExpr scope string)])
          (if (== "=" (peek string))
              ; parse another expr
              (let ([{expr2 string} (Lexer.lex string)])
@@ -311,69 +345,89 @@
              (list expr string)))))
 
   (= parseExpr
-     (lambda (string)                   ; -> [expr, string]
+     (lambda (scope string)                   ; -> [expr, string]
        (let ([tok (peek string)])
          (cond
-           [(== tok "if") (parseIf string)]
-           [(== tok "fn") (parseFn string)]
-           [else (parseCall string)]))))
+           [(== tok "if") (parseIf scope string)]
+           [(== tok "fn") (parseFn scope string)]
+           [else (parseCall scope string)]))))
 
   (= parseIf
-     (lambda (s)                        ; -> [expr, string]
+     (lambda (scope s)                        ; -> [expr, string]
        (let* ([s         (expect "if" s)]
-              [{test s}  (parseExpr s)]
+              [{test s}  (parseExpr scope s)]
               [s         (expect "then" s)]
-              [{consq s} (parseExpr s)]
+              [{consq s} (parseExpr scope s)]
               [s         (expect "else" )]
-              [{alt s}   (parseExpr s)])
+              [{alt s}   (parseExpr scope s)])
          (list (Builtin.tag #'Syntax.If (list test consq alt))
                s))))
 
   (= parseFn
-     (lambda (s)                        ; -> [expr, string]
+     (lambda (scope s)                        ; -> [expr, string]
        (let* ([s (expect "fn" s)]
-              [{params s} (parseCommaSepExpr s)]
+              [s (expect "(" s)]
+              [{paramNames s} (parseParamNames scope s)]
+              [scope (Util.foldr Scope.add scope paramNames)]
+              [params (Util.map (Scope.lookup scope) paramNames)]
+              [s (expect ")" s)]
               [s (expect "->" s)]
-              [{body s} (parseExpr s)])
+              [{body s} (parseExpr scope s)])
+         ;; TODO update and then use the scope!!!!!
          (list (Builtin.tag #'Syntax.Func (list params body))
                s))))
+  (= parseParamNames
+     (lambda (scope s)
+       (let ([tok (peek s)])
+         (cond
+           [(Lexer.isIden tok)  (let* ([{name} (Builtin.untag #'Lexer.Iden tok)]
+                                       [s (skip s)])
+                                  (if (== (peek s) ",")
+                                      (let* ([s (skip s)]
+                                             [{restParamNames s} (parseParamNames scope s)])
+                                        (Util.list (Builtin.link name restParamNames)
+                                                   s))
+                                      (Util.list (Util.list name)
+                                                 s)))]
+           [else (Util.list '() s)]))))
 
   (= parseCall
-     (lambda (s)
-       (let ([{head s} (parseAtom s)])
-         (parseCallLoop head s))))
+     (lambda (scope s)
+       (let ([{head s} (parseAtom scope s)])
+         (parseCallLoop scope head s))))
   (= parseCallLoop
-     (lambda (callee s)
+     (lambda (scope callee s)
        (let ([tok (peek s)])
          (if (== tok "(")
-             (let ([{args s} (parseParenArgs s)])
-               (parseCallLoop (Builtin.tag #'Syntax.Call (list callee args))
+             (let ([{args s} (parseParenArgs scope s)])
+               (parseCallLoop scope
+                              (Builtin.tag #'Syntax.Call (list callee args))
                               s))
              (list callee s)))))
   (= parseParenArgs
-     (lambda (s)
+     (lambda (scope s)
        (let* ([s (expect "(" s)]
-              [{es s} (parseArgs s)]
+              [{es s} (parseArgs scope s)]
               [s (expect ")" s)])
          (list es s))))
   (= parseArgs
-     (lambda (s)
+     (lambda (scope s)
        (if (== (peek s) ")")
            (list '() s)
-           (let ([{e s} (parseExpr s)])
+           (let ([{e s} (parseExpr scope s)])
              (if (== (peek s) ")")
                  (list (list e) s)
                  (let* ([s (expect "," s)]
-                        [{rest s} (parseArgs s)])
+                        [{rest s} (parseArgs scope s)])
                    (list (Builtin.link e rest) s)))))))
 
   (= parseAtom
-     (lambda (s)
+     (lambda (scope s)
        (let ([tok (peek s)])
          (cond
-           [(== tok "(") (parseParen s)]
+           [(== tok "(") (parseParen scope s)]
            [(Lexer.isIden tok) (let ([{name} (Builtin.untag #'Lexer.Iden tok)])
-                                 (list (Builtin.tag #'Syntax.Local (list name -1))
+                                 (list ((Scope.lookup scope) name)
                                        (skip s)))]
            [(Lexer.isNum tok) (let ([{val} (Builtin.untag #'Lexer.Num tok)])
                                 (list (Builtin.tag #'Syntax.Lit (list val))
@@ -384,9 +438,9 @@
            [else (Builtin.error (list "no case in parseAtom" tok))]))))
 
   (= parseParen
-     (lambda (string)                   ; -> [expr, string]
-       (let* ([string (expect "(" s)]
-              [(e string) (parseExpr string)])
+     (lambda (scope s)                   ; -> [expr, string]
+       (let* ([s (expect "(" s)]
+              [(e s) (parseExpr scope s)])
          (list e (expect ")" s)))))
 
 
