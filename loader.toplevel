@@ -303,50 +303,10 @@
   .  peek:
   .   - if open paren: parse the args, then parseCall
 
-  ; TODO add local binding (preparing for bootstrap)
-  ;   - ideally, the one local binding construct to rule them all: letrec*
-  ;   - need a very simple implementation of letrec* in the interpreter
-  ;      - but also needs destructuring bind for lists??
-  ;      - how does shadowing work??
-
-  use splicing-local somehow as the lone shadowing operator?
-  x = # sees *nothing*
-  local {
-  a = # sees x, a, b
-  b = # sees x, a, b
-  } in {
-  f = # sess x,
-  }
-
-  or, any repeated variable is implicitly shadowed?
-  maybe confusing:
-  { a = 1; f = () -> a }  # f sees a = 1
-  { f = () -> a; a = 2 }  # f sees a = 2
-  { a = 1; f = () -> a; a = 2 }  # f sees which one???
-
-  or, function bodies see things recursively; other things see things iteratively.
-  and raise an explicit error when it's ambiguous.
-  { a = 1; a = a + 1; } # shadow inc
-  { f = () -> f; }  # f returns itself
-  { a = 1; a = 2; f = () -> a; }  # error: which a do you mean? please rename something.
-
-  or think of it this way:
-  you could always resort to nested letrecs to get shadowing:
-  { a = 1; { a = a + 1; { a = a + 1; print(a) } } }
-  so what we need is just a shortcut to do that without adding indentation.
-  could that keyword be `let`?
-  a = 1
-  let a = a + 2
-  problem is that makes it sound like it applies just to `a`.
-
-  What about basing it all on shadow_unrelated?
-  https://github.com/Manishearth/rust-clippy/wiki#shadow_unrelated
-  - a = E[ a ]  does shadowing
-  - a = E[ fn() -> E[ a ] ]  does recursive something something??
-  - a = 1; a = 2  is disallowed!!!
-
-  OR just do OCaml letrec thing. shadow by default; explicit rec { } block for rec.
-
+  TODO add local binding (preparing for bootstrap)
+  - just do let* semantics for now
+  - syntax can be `let x = e ; ...` to emphasize different from definitions
+  - how are newlines treated though? see Pony lang
 
 
   ; TODO try to bootstrap the parser!
