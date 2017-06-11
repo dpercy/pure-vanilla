@@ -7,7 +7,8 @@ Extensible, scope-sensitive parser experiment
 |#
 
 (define-values {ast? ast-child?}
-  (flat-murec-contract ([ast? (cons/c symbol? (listof ast-child?))]
+  (flat-murec-contract ([ast? (or/c symbol?
+                                    (cons/c symbol? (listof ast-child?)))]
                         [ast-child? (or/c symbol? string? ast? (listof ast-child?))])
                        (values ast? ast-child?)))
 
@@ -38,7 +39,9 @@ similarly, `foo:whatever` refers to that other syntax class
         ))
 
 (struct Rule (tag patterns coverings) #:transparent)
-(struct Covers (definitions uses) #:transparent)
+(struct Covers (definitions ; hole-name
+                 uses ; listof hole-name
+                 ) #:transparent)
 
 (struct Grammar (table ; map( symbol -> listof( Rule ) )
                  ) #:transparent)
@@ -67,18 +70,29 @@ similarly, `foo:whatever` refers to that other syntax class
           (current-continuation-marks))))
 
 (define/contract (parse nt) (-> symbol? (or/c #f ast?))
-  (define rules (hash-ref (Grammar-table (current-grammar)) nt))
-  (match (peek!)
-    [#f #f]
-    [tok
-     (match (for/first ([rule rules]
-                        #:when (equal? tok (Rule-tag rule)))
-              rule)
-       ; no case of this nonterminal matched
+  (match nt
+    ; some nonterminals are built-in and special
+    ['id (if (symbol? (peek!))
+             (get!)
+             #false)]
+    ['binder
+     ; TODO remember that this is a binder
+     (if (symbol? (peek!))
+         (get!)
+         #false)]
+    [_
+     (define rules (hash-ref (Grammar-table (current-grammar)) nt))
+     (match (peek!)
        [#f #f]
-       [(Rule _ patterns coverings)
-        (get!)
-        (cons tok (parse-patterns patterns))])]))
+       [tok
+        (match (for/first ([rule rules]
+                           #:when (equal? tok (Rule-tag rule)))
+                 rule)
+          ; no case of this nonterminal matched
+          [#f #f]
+          [(Rule _ patterns coverings)
+           (get!)
+           (cons tok (parse-patterns patterns))])])]))
 
 (define/contract (parse-patterns patterns) (-> (listof Pattern?)
                                                (listof ast-child?))
@@ -116,7 +130,7 @@ similarly, `foo:whatever` refers to that other syntax class
 (module+ test
   (require rackunit)
 
-  ; expression := x | y | z | c:expression(a:expression, ...)
+  ; expression := x | y | z | call c:expression(a:expression, ...)
   (define A (Grammar (hash 'expression (list (Rule 'x '() '())
                                              (Rule 'y '() '())
                                              (Rule 'z '() '())
@@ -129,10 +143,10 @@ similarly, `foo:whatever` refers to that other syntax class
 
   (define (p toks)
     (displayln (format "case ~v" toks))
-    (parameterize ([current-grammar A]
-                   [current-tokens toks])
+    (parameterize ([current-tokens toks])
       (parse 'expression)))
 
+  (current-grammar A)
 
   ; var case
   (check-equal? (p '(x))  '(x))
@@ -144,6 +158,31 @@ similarly, `foo:whatever` refers to that other syntax class
   (check-equal? (p '(call x "(" call y "(" ")" ")"))  '(call (x) [(call (y) [])]))
   (check-equal? (p '(call x "(" y "," z ")"))  '(call (x) [(y) (z)]))
   (check-equal? (p '(call call x "(" y ")" "(" z ")"))  '(call (call (x) [(y)]) [(z)]))
+
+  ; expression :=
+  ; ; TODO allow a rule to be just an id
+  ; | var x:id
+  ; | app f:expression a:expression
+  ; | lam x:binder e:expression   where  x binds e
+  (define S (Grammar (hash 'expression
+                           (list (Rule 'var (list (Hole 'x 'id)) '())
+                                 (Rule 'app (list (Hole 'f 'expression) (Hole 'a 'expression)) '())
+                                 (Rule 'lam
+                                       (list (Hole 'x 'binder) (Hole 'e 'expression))
+                                       (list (Covers 'x '(e))))))))
+
+  (current-grammar S)
+
+  (check-equal? (p '(var x)) '(var x))
+  (check-equal? (p '(call var x var y)) '(call (var x) (var y)))
+
+  ; in this demo, binders are replaced with a counter
+  (check-equal? (p '(lam x var x)) '(lam 0 (var 0)))
+  (check-equal? (p '(lam x lam y var x)) '(lam 0 (lam 1 (var 0))))
+  (check-equal? (p '(lam x lam y var y)) '(lam 0 (lam 1 (var 1))))
+  (check-equal? (p '(call lam x var x lam x var x))
+                '(call (lam 0 (var 0))
+                       (lam 1 (var 1))))
 
 
   ;;

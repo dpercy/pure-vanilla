@@ -22,14 +22,14 @@
 (tag-struct "Syntax" (Call func args))
 (tag-struct "Syntax" (If test consq alt))
 
-(define (Syntax? v)
-  (or (Global? v)
-      Module?
-      Using?
-      Def?
-      Lit?
-      Quote?
-      Local?
-      Func?
-      Call?
-      If?))
+(define Syntax?
+  (or/c Global?
+        Module?
+        Using?
+        Def?
+        Lit?
+        Quote?
+        Local?
+        Func?
+        Call?
+        If?))

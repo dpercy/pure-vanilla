@@ -1,6 +1,0 @@
-(module ExampleLib
-    #;()
-
-  (= msg "Hello from example lib!")
-
-  )
