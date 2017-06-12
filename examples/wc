@@ -1,3 +1,0 @@
-
-main = (input) ->
-  show(length(splitlines(input)))
