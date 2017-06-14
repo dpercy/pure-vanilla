@@ -9,7 +9,8 @@
          Tagged?
          Typetag?
 
-         tag-struct)
+         tag-struct
+         tag-structs)
 
 (require racket/splicing
          racket/syntax
@@ -31,7 +32,8 @@
 (define/contract (destruct t v) (-> symbol? any/c (or/c #false list?))
   (match v
     [(Tagged (== t) args) args]
-    [(Tagged _ _) #false]))
+    [(Tagged _ _) #false]
+    [_ #false]))
 
 
 (define/contract (typetag t) (-> symbol? Typetag?)
@@ -89,3 +91,7 @@
     [(Bar x y) (begin
                  (check-equal? x 1)
                  (check-equal? y 2))]))
+
+(define-syntax-rule (tag-structs name forms ...)
+  (begin
+    (tag-struct name forms) ...))
