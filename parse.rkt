@@ -176,6 +176,8 @@ E ( E , ... )           -- call
 
                 [(Fn) (parse-function)]
 
+                [(Open) (parse-block)]
+
                 ; TODO infix rule for "(" for Call
 
                 [tok (error 'parse "Unexpected token ~v" tok)]))
@@ -189,6 +191,7 @@ E ( E , ... )           -- call
                        #:higher-precedence-than [ops '()])
     (match (peek)
       [(NameDotOp mod name)
+       ; TODO use a "resolve" function to avoid constructing Global twice - also to handle scope
        #:when (let ([op (Global mod name)])
                 (for/and ([other ops])
                   (cond
@@ -226,6 +229,12 @@ E ( E , ... )           -- call
     (match (peek)
       [(NameDotNumber name number) (begin (advance!) (Local name number))]
       [c (error 'parse "Expected a parameter but got ~v" c)]))
+
+  (define (parse-block)
+    (expect! (Open))
+    (define e (parse-expression))
+    (expect! (Close))
+    e)
 
   (define v (parse-expression))
   (expect! eof-object?)
@@ -281,6 +290,8 @@ E ( E , ... )           -- call
   (check-exn exn:fail?
              (lambda () (p "1 M.& 2 M.+ 3"))
              "use parentheses to disambiguate")
+  (check-equal? (p "(1 M.& 2) M.+ 3") (op "+" (op "&" (Lit 1) (Lit 2)) (Lit 3)))
+  (check-equal? (p "1 M.& (2 M.+ 3)") (op "&" (Lit 1) (op "+" (Lit 2) (Lit 3))))
 
 
   #|
