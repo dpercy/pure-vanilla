@@ -188,19 +188,26 @@ E ( E , ... )           -- call
   (define (parse-infix lhs
                        #:higher-precedence-than [ops '()])
     (match (peek)
-      [(NameDotOp mod op) #:when (for/and ([other ops])
-                                   (has-higher-precedence-than? op other))
-       ; if
+      [(NameDotOp mod name)
+       #:when (let ([op (Global mod name)])
+                (for/and ([other ops])
+                  (cond
+                    [(has-higher-precedence-than? op other) #true]
+                    [(has-higher-precedence-than? other op) #false]
+                    [else (error 'parse
+                                 "No precedence defined for ~v and ~v; use parentheses to disambiguate"
+                                 other op)])))
        (let ()
          (advance!)
-         (define f (Global mod op))
+         (define op (Global mod name))
          ; Note we call parse-expression here, which in turns calls
-         ; parse-infix again. This is how right recursion works.
+         ; parse-infix again. This is how right-recursion works.
          (define rhs (parse-expression
                       #:higher-precedence-than (cons op ops)))
-         (define call (Call f (list lhs rhs)))
+         (define call (Call op (list lhs rhs)))
          ; Now this whole call becomes the left-hand side:
          ; there may be another infix operator.
+         ; This is how left-recursion works.
          (parse-infix call #:higher-precedence-than ops))]
       [_ lhs]))
 
@@ -227,10 +234,16 @@ E ( E , ... )           -- call
   (require rackunit)
 
   (define (has-higher-precedence-than? a b)
-    #false)
+    (match* {a b}
+      [{(Global "M" "*") (Global "M" "+")} #true]
+      [{(Global "M" "^") (Global "M" "*")} #true]
+      ; because parse assumes this function is transitive,
+      ; we have to explicitly include this case
+      [{(Global "M" "^") (Global "M" "+")} #true]
+      ; if no rule says a precedence exists, it doesn't exist.
+      [{_ _} #false]))
 
   (define (p s)
-    (displayln s)
     (parse (make-lexer (open-input-string s))
            has-higher-precedence-than?))
 
@@ -256,6 +269,10 @@ E ( E , ... )           -- call
   (check-equal? (p "1 M.* 2 M.+ 3") (op "+" (op "*" (Lit 1) (Lit 2)) (Lit 3)))
   ; - right recursive
   (check-equal? (p "1 M.+ 2 M.* 3") (op "+" (Lit 1) (op "*" (Lit 2) (Lit 3))))
+  ; - both
+  (check-equal? (p "1 M.+ 2 M.* 3 M.^ 4") (op "+" (Lit 1) (op "*" (Lit 2) (op "^" (Lit 3) (Lit 4)))))
+  (check-equal? (p "1 M.+ 2 M.^ 3 M.* 4") (op "+" (Lit 1) (op "*" (op "^" (Lit 2) (Lit 3)) (Lit 4))))
+  (check-equal? (p "1 M.* 2 M.^ 3 M.+ 4") (op "+" (op "*" (Lit 1) (op "^" (Lit 2) (Lit 3))) (Lit 4)))
 
   ; TODO test self-assoc operators
   ; TODO test chaining operators of the same predecence, like + and -.
