@@ -190,6 +190,12 @@ E ( E , ... )           -- call
   (define (parse-infix lhs
                        #:higher-precedence-than [ops '()])
     (match (peek)
+      [(Open)
+       (let ()
+         (advance!)
+         (define args (parse-sep-end parse-expression (Comma) (Close)))
+         (define call (Call lhs args))
+         (parse-infix call #:higher-precedence-than ops))]
       [(NameDotOp mod name)
        ; TODO use a "resolve" function to avoid constructing Global twice - also to handle scope
        #:when (let ([op (Global mod name)])
@@ -324,7 +330,6 @@ E ( E , ... )           -- call
              (lambda () (p "1 M.$ 2 M.$ 3 M.+ 4"))
              "use parentheses to disambiguate")
 
-  #|
   (check-equal? (p "1()") (Call (Lit 1) '()))
   (check-equal? (p "1(2)") (Call (Lit 1) (list (Lit 2))))
   (check-equal? (p "1(2,)") (Call (Lit 1) (list (Lit 2))))
@@ -333,11 +338,10 @@ E ( E , ... )           -- call
 
   ; left recursion
   (check-equal? (p "1()(2,3)(4)")
-  (Call (Call (Call (Lit 1)
-  '())
-  (list (Lit 2) (Lit 3)))
-  (list (Lit 4))))
-  |#
+                (Call (Call (Call (Lit 1)
+                                  '())
+                            (list (Lit 2) (Lit 3)))
+                      (list (Lit 4))))
 
   ; right recursion
   (check-equal? (p "fn() -> fn(x.0, y.0) -> fn(x.1) -> 1")
@@ -346,10 +350,10 @@ E ( E , ... )           -- call
                             (Func (list (Local "x" 1))
                                   (Lit 1)))))
 
-  #|
   ; call binds tighter than func
   (check-equal? (p "fn() -> 1()") (Func '() (Call (Lit 1) '())))
-  |#
+  ; call binds tighter than binop
+  (check-equal? (p "1 M.+ 2()") (op "+" (Lit 1) (Call (Lit 2) '())))
 
 
   ;;
