@@ -140,7 +140,7 @@ E ( E , ... )           -- call
 
 
 
-(define (parse lex! has-higher-precedence-than?)
+(define (parse lex! how-to-group)
   ; wrap the lexer in a box to cache the current token
   (define curtok (box (lex!)))
   (define (peek) (unbox curtok))
@@ -194,12 +194,18 @@ E ( E , ... )           -- call
        ; TODO use a "resolve" function to avoid constructing Global twice - also to handle scope
        #:when (let ([op (Global mod name)])
                 (for/and ([other ops])
-                  (cond
-                    [(has-higher-precedence-than? op other) #true]
-                    [(has-higher-precedence-than? other op) #false]
-                    [else (error 'parse
-                                 "No precedence defined for ~v and ~v; use parentheses to disambiguate"
-                                 other op)])))
+                  (match (how-to-group other op)
+                    ; The left operator binds tighter, so just return.
+                    ['left #false]
+                    ; The right operator binds tighter;
+                    ; if it binds tigher than all operators in the context, we can
+                    ; keep parsing with right-recursion.
+                    ['right #true]
+                    ['illegal
+                     (error 'parse
+                            "No precedence defined for ~v and ~v; use parentheses to disambiguate"
+                            other op)]
+                    [v (error 'parse "how-to-group returned an invalid value: ~v" v)])))
        (let ()
          (advance!)
          (define op (Global mod name))
@@ -242,19 +248,36 @@ E ( E , ... )           -- call
 (module+ test
   (require rackunit)
 
-  (define (has-higher-precedence-than? a b)
+  (define (how-to-group a b)
     (match* {a b}
-      [{(Global "M" "*") (Global "M" "+")} #true]
-      [{(Global "M" "^") (Global "M" "*")} #true]
-      ; because parse assumes this function is transitive,
-      ; we have to explicitly include this case
-      [{(Global "M" "^") (Global "M" "+")} #true]
-      ; if no rule says a precedence exists, it doesn't exist.
-      [{_ _} #false]))
+      ; Parse does not compute transitive cases from this function.
+      ; This function must be explicit in every case.
+      [{(Global "M" "*") (Global "M" "+")} 'left]
+      [{(Global "M" "+") (Global "M" "*")} 'right]
+
+      [{(Global "M" "^") (Global "M" "*")} 'left]
+      [{(Global "M" "*") (Global "M" "^")} 'right]
+
+      [{(Global "M" "^") (Global "M" "+")} 'left]
+      [{(Global "M" "+") (Global "M" "^")} 'right]
+
+      ; Technically I should have 4 more cases with "-", but I'm not testing those cases.
+
+      ; Cases for "+" and "-" chaining
+      [{(Global "M" "+") (Global "M" "+")} 'left]
+      [{(Global "M" "-") (Global "M" "-")} 'left]
+      [{(Global "M" "+") (Global "M" "-")} 'left]
+      [{(Global "M" "-") (Global "M" "+")} 'left]
+
+      ; Example right-associative operator
+      [{(Global "M" "$") (Global "M" "$")} 'right]
+
+      ; If no rules cover this pair of operators, user must disambiguate.
+      [{_ _} 'illegal]))
 
   (define (p s)
     (parse (make-lexer (open-input-string s))
-           has-higher-precedence-than?))
+           how-to-group))
 
   (check-equal? (p "Foo.bar") (Global "Foo" "bar"))
   (check-equal? (p "bar.42") (Local "bar" 42))
@@ -283,9 +306,6 @@ E ( E , ... )           -- call
   (check-equal? (p "1 M.+ 2 M.^ 3 M.* 4") (op "+" (Lit 1) (op "*" (op "^" (Lit 2) (Lit 3)) (Lit 4))))
   (check-equal? (p "1 M.* 2 M.^ 3 M.+ 4") (op "+" (op "*" (Lit 1) (op "^" (Lit 2) (Lit 3))) (Lit 4)))
 
-  ; TODO test self-assoc operators
-  ; TODO test chaining operators of the same predecence, like + and -.
-
   ; undefined precedence
   (check-exn exn:fail?
              (lambda () (p "1 M.& 2 M.+ 3"))
@@ -293,6 +313,16 @@ E ( E , ... )           -- call
   (check-equal? (p "(1 M.& 2) M.+ 3") (op "+" (op "&" (Lit 1) (Lit 2)) (Lit 3)))
   (check-equal? (p "1 M.& (2 M.+ 3)") (op "&" (Lit 1) (op "+" (Lit 2) (Lit 3))))
 
+  ; associative operators
+  (check-equal? (p "1 M.+ 2 M.+ 3 M.+ 4") (p "((1 M.+ 2) M.+ 3) M.+ 4"))
+  (check-equal? (p "1 M.+ 2 M.- 3 M.+ 4") (p "((1 M.+ 2) M.- 3) M.+ 4"))
+  (check-equal? (p "1 M.- 2 M.- 3 M.+ 4") (p "((1 M.- 2) M.- 3) M.+ 4"))
+  (check-equal? (p "1 M.+ 2 M.+ 3 M.- 4") (p "((1 M.+ 2) M.+ 3) M.- 4"))
+
+  (check-equal? (p "1 M.$ 2 M.$ 3 M.$ 4") (p "1 M.$ (2 M.$ (3 M.$ 4))"))
+  (check-exn exn:fail?
+             (lambda () (p "1 M.$ 2 M.$ 3 M.+ 4"))
+             "use parentheses to disambiguate")
 
   #|
   (check-equal? (p "1()") (Call (Lit 1) '()))
