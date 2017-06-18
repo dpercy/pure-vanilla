@@ -22,9 +22,9 @@ E ( E , ... )           -- call
 |#
 
 ; TODO:
-; 1. impl simple pratt parser POC
+; 1. (DONE) impl simple pratt parser POC
 ; 2. add scope resolution
-; 3. add symbol table / operators
+; 3. (DONE) add symbol table / operators
 ; 4. add general Racket extensions
 
 (tag-structs
