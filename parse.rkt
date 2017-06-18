@@ -23,7 +23,7 @@ E ( E , ... )           -- call
 
 ; TODO:
 ; 1. (DONE) impl simple pratt parser POC
-; 2. add scope resolution
+; 2. (DONE) add scope resolution
 ; 3. (DONE) add symbol table / operators
 ; 4. add general Racket extensions
 
@@ -32,6 +32,8 @@ E ( E , ... )           -- call
  (NameDotName x y)
  (NameDotNumber x n)
  (NameDotOp x y)
+ (NameUnqualified x)
+ (OpUnqualified x)
  (String s)
  (Number n)
 
@@ -57,12 +59,12 @@ E ( E , ... )           -- call
       (match (peek-char port)
         [(? eof-object?) eof]
         [(? name-start?) (name!)]
+        [(? op-char?) (op!)]
         [#\" (string!)]
         [(? char-numeric?) (number!)]
         [#\( (begin (read-char port) (Open))]
         [#\) (begin (read-char port) (Close))]
-        [#\, (begin (read-char port) (Comma))]
-        [#\-  (arrow!)])))
+        [#\, (begin (read-char port) (Comma))])))
 
   (define (name-start? c) (or (equal? c #\_)
                               (char-alphabetic? c)))
@@ -93,23 +95,17 @@ E ( E , ... )           -- call
   (define (keyword-or-bare-name name)
     (match name
       ["fn" (Fn)]
-      [_ (error 'lex "TODO: bare names: ~v" name)]))
+      [_ (NameUnqualified name)]))
+
+  (define (op!)
+    (match (eat-while! op-char?)
+      ["->" (Arrow)]
+      [v (OpUnqualified v)]))
 
   ; NOTE this is cheating: using Racket's lexer.
   (define (string!) (String (read port)))
 
   (define (number!) (Number (string->number (eat-while! char-numeric?))))
-
-  (define (arrow!)
-    (match (peek-char port)
-      [#\- (begin
-             (read-char port)
-             (match (peek-char port)
-               [#\> (begin
-                      (read-char port)
-                      (Arrow))]
-               [c (error 'lex "Unexpected char: ~v" c)]))]
-      [c (error 'lex "Unexpected char: ~v" c)]))
 
   (define (eat-while! char-pred)
     (with-output-to-string
@@ -140,11 +136,13 @@ E ( E , ... )           -- call
 
 
 
-(define (parse lex! how-to-group)
+(define (parse lex! module-name how-to-group)
   ; wrap the lexer in a box to cache the current token
   (define curtok (box (lex!)))
   (define (peek) (unbox curtok))
   (define (advance!) (set-box! curtok (lex!)))
+  ; keep environment info in parameters
+  (define bare-locals (make-parameter (set))) ; setof string
 
   ; conveniences for common parsing patterns
   (define (peek? pred-or-tok)
@@ -171,6 +169,10 @@ E ( E , ... )           -- call
     (define e (match (peek)
                 [(NameDotName mod name) (begin (advance!) (Global mod name))]
                 [(NameDotNumber name number) (begin (advance!) (Local name number))]
+                [(NameUnqualified name) (begin (advance!)
+                                               (if (set-member? (bare-locals) name)
+                                                   (Local name #false)
+                                                   (Global module-name name)))]
                 [(String s) (begin (advance!) (Lit s))]
                 [(Number n) (begin (advance!) (Lit n))]
 
@@ -189,6 +191,12 @@ E ( E , ... )           -- call
   ;  - lhs op rhs
   (define (parse-infix lhs
                        #:higher-precedence-than [ops '()])
+    (define (cleanup tok)
+      (match tok
+        [(OpUnqualified name) (NameDotOp module-name name)]
+        [(NameUnqualified name) #:when (set-member? (bare-locals) name)
+         (NameDotName module-name name)]
+        [_ tok]))
     (match (peek)
       [(Open)
        (let ()
@@ -196,8 +204,8 @@ E ( E , ... )           -- call
          (define args (parse-sep-end parse-expression (Comma) (Close)))
          (define call (Call lhs args))
          (parse-infix call #:higher-precedence-than ops))]
-      [(NameDotOp mod name)
-       ; TODO use a "resolve" function to avoid constructing Global twice - also to handle scope
+      [(app cleanup (or (NameDotOp   mod name)
+                        (NameDotName mod name)))
        #:when (let ([op (Global mod name)])
                 (for/and ([other ops])
                   (match (how-to-group other op)
@@ -226,11 +234,21 @@ E ( E , ... )           -- call
          (parse-infix call #:higher-precedence-than ops))]
       [_ lhs]))
 
+  (define (bare-local? lcl)
+    (match lcl
+      [(Local name #false) name]
+      [_ #false]))
+
   (define (parse-function)
     (expect! (Fn))
     (define params (parse-parameters))
+    ; TODO check duplicate params? or in a separate pass? or in the constructor?
     (expect! (Arrow))
-    (define body (parse-expression))
+    (define body (let ([bare-params (filter-map bare-local? params)])
+                   (parameterize ([bare-locals (for/fold ([s (bare-locals)])
+                                                         ([p bare-params])
+                                                 (set-add s p))])
+                     (parse-expression))))
     (Func params body))
 
   (define (parse-parameters)
@@ -240,6 +258,7 @@ E ( E , ... )           -- call
   (define (parse-parameter)
     (match (peek)
       [(NameDotNumber name number) (begin (advance!) (Local name number))]
+      [(NameUnqualified name) (begin (advance!) (Local name #false))]
       [c (error 'parse "Expected a parameter but got ~v" c)]))
 
   (define (parse-block)
@@ -283,6 +302,7 @@ E ( E , ... )           -- call
 
   (define (p s)
     (parse (make-lexer (open-input-string s))
+           "M"
            how-to-group))
 
   (check-equal? (p "Foo.bar") (Global "Foo" "bar"))
@@ -295,6 +315,13 @@ E ( E , ... )           -- call
   (check-equal? (p "fn(x.0,) -> 1") (Func (list (Local "x" 0)) (Lit 1)))
   (check-equal? (p "fn(x.0,x.1) -> 1") (Func (list (Local "x" 0) (Local "x" 1)) (Lit 1)))
   (check-equal? (p "fn(x.0,x.1,) -> 1") (Func (list (Local "x" 0) (Local "x" 1)) (Lit 1)))
+
+  ; scope resolution
+  (check-equal? (p "x") (p "M.x"))
+  (check-equal? (p "fn(x) -> 1") (Func (list (Local "x" #f)) (Lit 1)))
+  (check-equal? (p "fn(x) -> x") (Func (list (Local "x" #f)) (Local "x" #f)))
+  (check-equal? (p "fn(x.0) -> x") (p "fn(x.0) -> M.x")) ; x.0 doesn't bind x
+  (check-equal? (p "fn(x) -> x.0") (Func (list (Local "x" #f)) (Local "x" 0)))
 
   ; binops
   (define (op name left right)
@@ -311,6 +338,9 @@ E ( E , ... )           -- call
   (check-equal? (p "1 M.+ 2 M.* 3 M.^ 4") (op "+" (Lit 1) (op "*" (Lit 2) (op "^" (Lit 3) (Lit 4)))))
   (check-equal? (p "1 M.+ 2 M.^ 3 M.* 4") (op "+" (Lit 1) (op "*" (op "^" (Lit 2) (Lit 3)) (Lit 4))))
   (check-equal? (p "1 M.* 2 M.^ 3 M.+ 4") (op "+" (op "*" (Lit 1) (op "^" (Lit 2) (Lit 3))) (Lit 4)))
+
+  ; binop scope resolution
+  (check-equal? (p "1 * 2 + 3") (op "+" (op "*" (Lit 1) (Lit 2)) (Lit 3)))
 
   ; undefined precedence
   (check-exn exn:fail?
