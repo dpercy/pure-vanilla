@@ -25,7 +25,10 @@ E ( E , ... )           -- call
 ; 1. (DONE) impl simple pratt parser POC
 ; 2. (DONE) add scope resolution
 ; 3. (DONE) add symbol table / operators
-; 4. add general Racket extensions
+; 4. (DONE) add general Racket extensions
+;  - don't do Call for infix ops - run a parselet
+;  - test case can create new nodes to test parselet
+;
 
 (tag-structs
  "Token"
@@ -136,7 +139,7 @@ E ( E , ... )           -- call
 
 
 
-(define (parse lex! module-name how-to-group)
+(define (parse lex! module-name infix-dispatch how-to-group)
   ; wrap the lexer in a box to cache the current token
   (define curtok (box (lex!)))
   (define (peek) (unbox curtok))
@@ -180,8 +183,6 @@ E ( E , ... )           -- call
 
                 [(Open) (parse-block)]
 
-                ; TODO infix rule for "(" for Call
-
                 [tok (error 'parse "Unexpected token ~v" tok)]))
     (parse-infix e #:higher-precedence-than ops))
 
@@ -193,8 +194,8 @@ E ( E , ... )           -- call
                        #:higher-precedence-than [ops '()])
     (define (cleanup tok)
       (match tok
-        [(OpUnqualified name) (NameDotOp module-name name)]
-        [(NameUnqualified name) #:when (set-member? (bare-locals) name)
+        [(OpUnqualified name)   (NameDotOp   module-name name)]
+        [(NameUnqualified name) #:when (not (set-member? (bare-locals) name))
          (NameDotName module-name name)]
         [_ tok]))
     (match (peek)
@@ -204,34 +205,39 @@ E ( E , ... )           -- call
          (define args (parse-sep-end parse-expression (Comma) (Close)))
          (define call (Call lhs args))
          (parse-infix call #:higher-precedence-than ops))]
-      [(app cleanup (or (NameDotOp   mod name)
-                        (NameDotName mod name)))
+      [(app cleanup (and (or (NameDotOp   mod name)
+                             (NameDotName mod name))
+                         tok))
        #:when (let ([op (Global mod name)])
-                (for/and ([other ops])
-                  (match (how-to-group other op)
-                    ; The left operator binds tighter, so just return.
-                    ['left #false]
-                    ; The right operator binds tighter;
-                    ; if it binds tigher than all operators in the context, we can
-                    ; keep parsing with right-recursion.
-                    ['right #true]
-                    ['illegal
-                     (error 'parse
-                            "No precedence defined for ~v and ~v; use parentheses to disambiguate"
-                            other op)]
-                    [v (error 'parse "how-to-group returned an invalid value: ~v" v)])))
+                (match (infix-dispatch op)
+                  ['illegal (error 'parse "Not defined as an infix operator: ~v" op)]
+                  [(? procedure?)
+                   (for/and ([other ops])
+                     (match (how-to-group other op)
+                       ; The left operator binds tighter, so just return.
+                       ['left #false]
+                       ; The right operator binds tighter;
+                       ; if it binds tigher than all operators in the context, we can
+                       ; keep parsing with right-recursion.
+                       ['right #true]
+                       ['illegal
+                        (error 'parse
+                               "No precedence defined for ~v and ~v; use parentheses to disambiguate"
+                               other op)]
+                       [v (error 'parse "how-to-group returned an invalid value: ~v" v)]))]))
        (let ()
-         (advance!)
          (define op (Global mod name))
-         ; Note we call parse-expression here, which in turns calls
+         (define parselet (infix-dispatch op))
+         (advance!)
+         ; The parselet can call parse-expression, which in turns calls
          ; parse-infix again. This is how right-recursion works.
-         (define rhs (parse-expression
-                      #:higher-precedence-than (cons op ops)))
-         (define call (Call op (list lhs rhs)))
+         (define parselet-result
+           (parselet lhs op peek advance!
+                     (lambda () (parse-expression #:higher-precedence-than (cons op ops)))))
          ; Now this whole call becomes the left-hand side:
          ; there may be another infix operator.
          ; This is how left-recursion works.
-         (parse-infix call #:higher-precedence-than ops))]
+         (parse-infix parselet-result #:higher-precedence-than ops))]
       [_ lhs]))
 
   (define (bare-local? lcl)
@@ -273,6 +279,13 @@ E ( E , ... )           -- call
 (module+ test
   (require rackunit)
 
+  (define (infix-dispatch tok)
+    (match tok
+      [(Global "M" (or "^" "*" "+" "-" "$" "&")) parselet:infix-call]
+      [(Global "M" "and") parselet:and]
+      [(Global "M" "or") parselet:or]
+      [_ 'illegal]))
+
   (define (how-to-group a b)
     (match* {a b}
       ; Parse does not compute transitive cases from this function.
@@ -297,12 +310,32 @@ E ( E , ... )           -- call
       ; Example right-associative operator
       [{(Global "M" "$") (Global "M" "$")} 'right]
 
+      ; "and" binds tighter than "or"
+      [{(Global "M" "and") (Global "M" "or")} 'left]
+      [{(Global "M" "or") (Global "M" "and")} 'right]
+
       ; If no rules cover this pair of operators, user must disambiguate.
       [{_ _} 'illegal]))
+
+  (define (parselet:infix-call lhs op peek advance! parse-expression)
+    (define rhs (parse-expression))
+    (Call op (list lhs rhs)))
+
+  (tag-structs
+   "Logic"
+   (And x y)
+   (Or x y))
+  (define (parselet:and lhs op peek advance! parse-expression)
+    (define rhs (parse-expression))
+    (And lhs rhs))
+  (define (parselet:or lhs op peek advance! parse-expression)
+    (define rhs (parse-expression))
+    (Or lhs rhs))
 
   (define (p s)
     (parse (make-lexer (open-input-string s))
            "M"
+           infix-dispatch
            how-to-group))
 
   (check-equal? (p "Foo.bar") (Global "Foo" "bar"))
@@ -385,6 +418,14 @@ E ( E , ... )           -- call
   ; call binds tighter than binop
   (check-equal? (p "1 M.+ 2()") (op "+" (Lit 1) (Call (Lit 2) '())))
 
+  ; logical operator - returns a custom node type
+  (check-equal? (p "1 and 2") (And (Lit 1) (Lit 2)))
+  (check-equal? (p "1 or 2") (Or (Lit 1) (Lit 2)))
+  (check-equal? (p "1 or 2 and 3") (Or (Lit 1) (And (Lit 2) (Lit 3))))
+  (check-equal? (p "1 and 2 or 3") (Or (And (Lit 1) (Lit 2)) (Lit 3)))
+
+  ; shadowing keywords works fine
+  (check-equal? (p "fn(and) -> and") (Func (list (Local "and" #f)) (Local "and" #f)))
 
   ;;
   )
