@@ -1,5 +1,10 @@
 #lang racket
 
+(provide parse
+         parselet:infix-call
+         make-lexer
+         )
+
 (require "constructor.rkt"
          "ast.rkt")
 
@@ -45,6 +50,7 @@ E ( E , ... )           -- call
  (Close)
  (Comma)
  (Arrow)
+ (Newline)
 
  ;;
  )
@@ -58,7 +64,7 @@ E ( E , ... )           -- call
                                      (lambda _ (error 'read "not supposed to use this"))
                                      (lambda _ (error 'peek "not supposed to use this"))
                                      (lambda _ (error 'close "not supposed to use this")))])
-      (eat-while! char-blank?)
+      (eat-whitespace!)
       (match (peek-char port)
         [(? eof-object?) eof]
         [(? name-start?) (name!)]
@@ -67,7 +73,21 @@ E ( E , ... )           -- call
         [(? char-numeric?) (number!)]
         [#\( (begin (read-char port) (Open))]
         [#\) (begin (read-char port) (Close))]
-        [#\, (begin (read-char port) (Comma))])))
+        [#\, (begin (read-char port) (Comma))]
+        [#\newline (newline!)]
+        [c (error 'lex "Unexpected character: ~v" c)])))
+
+  (define (eat-whitespace!)
+    ; Whitespace includes comments, but not newlines.
+    ; Newlines are significant.
+    (eat-while! char-blank?)
+    (match (peek-char port)
+      [#\# (begin
+             (eat-comment!)
+             (eat-whitespace!))]
+      [_ (void)]))
+  (define (eat-comment!)
+    (eat-while! (not/c #\newline)))
 
   (define (name-start? c) (or (equal? c #\_)
                               (char-alphabetic? c)))
@@ -109,6 +129,21 @@ E ( E , ... )           -- call
   (define (string!) (String (read port)))
 
   (define (number!) (Number (string->number (eat-while! char-numeric?))))
+
+  (define (newline!)
+    ; A "newline" token consists of one or more newline characters
+    ; with whitespace in between.
+    (match (peek-char port)
+      [#\newline (begin
+                   (read-char port)
+                   (let zero-or-more-newlines ()
+                     (eat-whitespace!)
+                     (match (peek-char port)
+                       [#\newline (begin
+                                    (read-char port)
+                                    (zero-or-more-newlines))]
+                       [_ (Newline)])))]
+      [c (error 'lex "not a newline: ~v" c)]))
 
   (define (eat-while! char-pred)
     (with-output-to-string
@@ -276,6 +311,11 @@ E ( E , ... )           -- call
   (define v (parse-expression))
   (expect! eof-object?)
   v)
+
+(define (parselet:infix-call lhs op peek advance! parse-expression)
+  (define rhs (parse-expression))
+  (Call op (list lhs rhs)))
+
 (module+ test
   (require rackunit)
 
@@ -316,10 +356,6 @@ E ( E , ... )           -- call
 
       ; If no rules cover this pair of operators, user must disambiguate.
       [{_ _} 'illegal]))
-
-  (define (parselet:infix-call lhs op peek advance! parse-expression)
-    (define rhs (parse-expression))
-    (Call op (list lhs rhs)))
 
   (tag-structs
    "Logic"
