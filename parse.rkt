@@ -2,7 +2,6 @@
 
 (provide parse
          parselet:infix-call
-         make-lexer
          )
 
 (require "constructor.rkt"
@@ -35,53 +34,60 @@ E ( E , ... )           -- call
 ;  - test case can create new nodes to test parselet
 ;
 
-(tag-structs
- "Token"
- (NameDotName x y)
- (NameDotNumber x n)
- (NameDotOp x y)
- (NameUnqualified x)
- (OpUnqualified x)
- (String s)
- (Number n)
+(module tokens racket
+  (provide (all-defined-out))
+  (require "constructor.rkt")
+  (tag-structs
+   "Token"
+   (NameDotName x y)
+   (NameDotNumber x n)
+   (NameDotOp x y)
+   (NameUnqualified x)
+   (OpUnqualified x)
+   (String s)
+   (Number n)
 
- (Fn)
- (Open)
- (Close)
- (Comma)
- (Arrow)
- (Newline)
+   (Fn)
+   (Open)
+   (Close)
+   (Comma)
+   (Arrow)
+   (Newline)
 
- ;;
- )
-(define (make-lexer port)
-  ; Every time lex is called, returns another token from the input port.
+   ;;
+   ))
+(module lexer racket
+  (provide read-token peek-token)
+
+  (require racket/port)
+  (require (submod ".." tokens))
+
+  ; Every time lex is called, returns another token from the current input port.
   ; The only characters consumed from the port are part of the token.
 
-  (define (lex!)
-    (parameterize ([current-input-port
-                    (make-input-port "not supposed to use this"
-                                     (lambda _ (error 'read "not supposed to use this"))
-                                     (lambda _ (error 'peek "not supposed to use this"))
-                                     (lambda _ (error 'close "not supposed to use this")))])
+  (define (read-token [port (current-input-port)])
+    (parameterize ([current-input-port port])
       (eat-whitespace!)
-      (match (peek-char port)
+      (match (peek-char)
         [(? eof-object?) eof]
         [(? name-start?) (name!)]
         [(? op-char?) (op!)]
         [#\" (string!)]
         [(? char-numeric?) (number!)]
-        [#\( (begin (read-char port) (Open))]
-        [#\) (begin (read-char port) (Close))]
-        [#\, (begin (read-char port) (Comma))]
+        [#\( (begin (read-char) (Open))]
+        [#\) (begin (read-char) (Close))]
+        [#\, (begin (read-char) (Comma))]
         [#\newline (newline!)]
         [c (error 'lex "Unexpected character: ~v" c)])))
+
+  (define (peek-token [port (current-input-port)])
+    (read-token (peeking-input-port port)))
 
   (define (eat-whitespace!)
     ; Whitespace includes comments, but not newlines.
     ; Newlines are significant.
     (eat-while! char-blank?)
-    (match (peek-char port)
+    (match (peek-char)
       [#\# (begin
              (eat-comment!)
              (eat-whitespace!))]
@@ -98,10 +104,10 @@ E ( E , ... )           -- call
                             (not (member c '(#\" #\( #\) #\,)))))
   (define (name!)
     (define x (eat-while! name-char?))
-    (match (peek-char port)
+    (match (peek-char)
       [#\. (begin
-             (read-char port)
-             (match (peek-char port)
+             (read-char)
+             (match (peek-char)
                [(? eof-object?) (error 'lex "Unexpected EOF after dot")]
                [(? name-start?) (begin
                                   (define y (eat-while! name-char?))
@@ -126,21 +132,21 @@ E ( E , ... )           -- call
       [v (OpUnqualified v)]))
 
   ; NOTE this is cheating: using Racket's lexer.
-  (define (string!) (String (read port)))
+  (define (string!) (String (read)))
 
   (define (number!) (Number (string->number (eat-while! char-numeric?))))
 
   (define (newline!)
     ; A "newline" token consists of one or more newline characters
     ; with whitespace in between.
-    (match (peek-char port)
+    (match (peek-char)
       [#\newline (begin
-                   (read-char port)
+                   (read-char)
                    (let zero-or-more-newlines ()
                      (eat-whitespace!)
-                     (match (peek-char port)
+                     (match (peek-char)
                        [#\newline (begin
-                                    (read-char port)
+                                    (read-char)
                                     (zero-or-more-newlines))]
                        [_ (Newline)])))]
       [c (error 'lex "not a newline: ~v" c)]))
@@ -149,21 +155,22 @@ E ( E , ... )           -- call
     (with-output-to-string
       (lambda ()
         (let loop ()
-          (match (peek-char port)
+          (match (peek-char)
             [(? eof-object?) (void)]
             [(? char-pred c) (begin
-                               (read-char port)
+                               (read-char)
                                (write-char c)
                                (loop))]
-            [_ (void)])))))
-
-  lex!)
+            [_ (void)]))))))
+(require 'tokens)
+(require 'lexer)
 (module+ test
   (require rackunit)
 
   (define (lex s)
-    (for/list ([token (in-producer (make-lexer (open-input-string s))
-                                   eof-object?)])
+    (for/list ([token (in-producer read-token
+                                   eof-object?
+                                   (open-input-string s))])
       token))
 
   (check-equal? (lex "asdf.qwer") (list (NameDotName "asdf" "qwer")))
@@ -172,13 +179,18 @@ E ( E , ... )           -- call
   ;;
   )
 
+(define (port->module-name port)
+  (match (object-name port)
+    [(? path? path) (path->string
+                     (path-replace-extension (last (explode-path path))
+                                             ""))]
+    [(? string? s) s]
+    ['string "Main"]))
 
+(define (parse infix-dispatch how-to-group)
+  (define (peek) (peek-token))
+  (define (advance!) (read-token))
 
-(define (parse lex! module-name infix-dispatch how-to-group)
-  ; wrap the lexer in a box to cache the current token
-  (define curtok (box (lex!)))
-  (define (peek) (unbox curtok))
-  (define (advance!) (set-box! curtok (lex!)))
   ; keep environment info in parameters
   (define bare-locals (make-parameter (set))) ; setof string
 
@@ -204,13 +216,14 @@ E ( E , ... )           -- call
   ; entry point for parsing
   (define (parse-expression
            #:higher-precedence-than [ops '()])
+    (define mn (port->module-name (current-input-port)))
     (define e (match (peek)
                 [(NameDotName mod name) (begin (advance!) (Global mod name))]
                 [(NameDotNumber name number) (begin (advance!) (Local name number))]
                 [(NameUnqualified name) (begin (advance!)
                                                (if (set-member? (bare-locals) name)
                                                    (Local name #false)
-                                                   (Global module-name name)))]
+                                                   (Global mn name)))]
                 [(String s) (begin (advance!) (Lit s))]
                 [(Number n) (begin (advance!) (Lit n))]
 
@@ -227,11 +240,12 @@ E ( E , ... )           -- call
   ;  - lhs op rhs
   (define (parse-infix lhs
                        #:higher-precedence-than [ops '()])
+    (define mn (port->module-name (current-input-port)))
     (define (cleanup tok)
       (match tok
-        [(OpUnqualified name)   (NameDotOp   module-name name)]
+        [(OpUnqualified name) (NameDotOp mn name)]
         [(NameUnqualified name) #:when (not (set-member? (bare-locals) name))
-         (NameDotName module-name name)]
+         (NameDotName mn name)]
         [_ tok]))
     (match (peek)
       [(Open)
@@ -369,10 +383,9 @@ E ( E , ... )           -- call
     (Or lhs rhs))
 
   (define (p s)
-    (parse (make-lexer (open-input-string s))
-           "M"
-           infix-dispatch
-           how-to-group))
+    (parameterize ([current-input-port (open-input-string s "M")])
+      (parse infix-dispatch
+             how-to-group)))
 
   (check-equal? (p "Foo.bar") (Global "Foo" "bar"))
   (check-equal? (p "bar.42") (Local "bar" 42))
