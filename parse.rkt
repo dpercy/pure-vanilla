@@ -187,9 +187,12 @@ E ( E , ... )           -- call
     [(? string? s) s]
     ['string "Main"]))
 
-(define (parse infix-dispatch how-to-group)
-  (define (peek) (peek-token))
-  (define (advance!) (read-token))
+; TODO replace these with more specific parameters: sets of precedence rules,
+;   and let the parser do smart things to resolve them.
+(define current-infix-dispatch (make-parameter (lambda (tok) 'illegal)))
+(define current-how-to-group (make-parameter (lambda (a b) 'illegal)))
+
+(define (parse)
 
   ; keep environment info in parameters
   (define bare-locals (make-parameter (set))) ; setof string
@@ -197,35 +200,35 @@ E ( E , ... )           -- call
   ; conveniences for common parsing patterns
   (define (peek? pred-or-tok)
     (if (procedure? pred-or-tok)
-        (pred-or-tok (peek))
-        (equal? pred-or-tok (peek))))
+        (pred-or-tok (peek-token))
+        (equal? pred-or-tok (peek-token))))
   (define (expect! pred-or-tok)
     (if (peek? pred-or-tok)
-        (advance!)
-        (error 'parse "Expected ~v but got ~v" pred-or-tok (peek))))
+        (read-token)
+        (error 'parse "Expected ~v but got ~v" pred-or-tok (peek-token))))
   (define (parse-sep-end parse-item sep end)
     (cond
-      [(peek? end) (begin (advance!) '())]
+      [(peek? end) (begin (read-token) '())]
       [else
        (let ([first (parse-item)])
          (cond
-           [(peek? end) (begin (advance!) (list first))]
-           [(peek? sep) (begin (advance!) (cons first (parse-sep-end parse-item sep end)))]
-           [else (error 'parse "Expected ~v or ~v but got ~v" sep end (peek))]))]))
+           [(peek? end) (begin (read-token) (list first))]
+           [(peek? sep) (begin (read-token) (cons first (parse-sep-end parse-item sep end)))]
+           [else (error 'parse "Expected ~v or ~v but got ~v" sep end (peek-token))]))]))
 
   ; entry point for parsing
   (define (parse-expression
            #:higher-precedence-than [ops '()])
     (define mn (port->module-name (current-input-port)))
-    (define e (match (peek)
-                [(NameDotName mod name) (begin (advance!) (Global mod name))]
-                [(NameDotNumber name number) (begin (advance!) (Local name number))]
-                [(NameUnqualified name) (begin (advance!)
+    (define e (match (peek-token)
+                [(NameDotName mod name) (begin (read-token) (Global mod name))]
+                [(NameDotNumber name number) (begin (read-token) (Local name number))]
+                [(NameUnqualified name) (begin (read-token)
                                                (if (set-member? (bare-locals) name)
                                                    (Local name #false)
                                                    (Global mn name)))]
-                [(String s) (begin (advance!) (Lit s))]
-                [(Number n) (begin (advance!) (Lit n))]
+                [(String s) (begin (read-token) (Lit s))]
+                [(Number n) (begin (read-token) (Lit n))]
 
                 [(Fn) (parse-function)]
 
@@ -247,10 +250,10 @@ E ( E , ... )           -- call
         [(NameUnqualified name) #:when (not (set-member? (bare-locals) name))
          (NameDotName mn name)]
         [_ tok]))
-    (match (peek)
+    (match (peek-token)
       [(Open)
        (let ()
-         (advance!)
+         (read-token)
          (define args (parse-sep-end parse-expression (Comma) (Close)))
          (define call (Call lhs args))
          (parse-infix call #:higher-precedence-than ops))]
@@ -258,11 +261,11 @@ E ( E , ... )           -- call
                              (NameDotName mod name))
                          tok))
        #:when (let ([op (Global mod name)])
-                (match (infix-dispatch op)
+                (match ((current-infix-dispatch) op)
                   ['illegal (error 'parse "Not defined as an infix operator: ~v" op)]
                   [(? procedure?)
                    (for/and ([other ops])
-                     (match (how-to-group other op)
+                     (match ((current-how-to-group) other op)
                        ; The left operator binds tighter, so just return.
                        ['left #false]
                        ; The right operator binds tighter;
@@ -276,12 +279,12 @@ E ( E , ... )           -- call
                        [v (error 'parse "how-to-group returned an invalid value: ~v" v)]))]))
        (let ()
          (define op (Global mod name))
-         (define parselet (infix-dispatch op))
-         (advance!)
+         (define parselet ((current-infix-dispatch) op))
+         (read-token)
          ; The parselet can call parse-expression, which in turns calls
          ; parse-infix again. This is how right-recursion works.
          (define parselet-result
-           (parselet lhs op peek advance!
+           (parselet lhs op
                      (lambda () (parse-expression #:higher-precedence-than (cons op ops)))))
          ; Now this whole call becomes the left-hand side:
          ; there may be another infix operator.
@@ -311,9 +314,9 @@ E ( E , ... )           -- call
     (parse-sep-end parse-parameter (Comma) (Close)))
 
   (define (parse-parameter)
-    (match (peek)
-      [(NameDotNumber name number) (begin (advance!) (Local name number))]
-      [(NameUnqualified name) (begin (advance!) (Local name #false))]
+    (match (peek-token)
+      [(NameDotNumber name number) (begin (read-token) (Local name number))]
+      [(NameUnqualified name) (begin (read-token) (Local name #false))]
       [c (error 'parse "Expected a parameter but got ~v" c)]))
 
   (define (parse-block)
@@ -326,7 +329,7 @@ E ( E , ... )           -- call
   (expect! eof-object?)
   v)
 
-(define (parselet:infix-call lhs op peek advance! parse-expression)
+(define (parselet:infix-call lhs op parse-expression)
   (define rhs (parse-expression))
   (Call op (list lhs rhs)))
 
@@ -375,17 +378,18 @@ E ( E , ... )           -- call
    "Logic"
    (And x y)
    (Or x y))
-  (define (parselet:and lhs op peek advance! parse-expression)
+  (define (parselet:and lhs op parse-expression)
     (define rhs (parse-expression))
     (And lhs rhs))
-  (define (parselet:or lhs op peek advance! parse-expression)
+  (define (parselet:or lhs op parse-expression)
     (define rhs (parse-expression))
     (Or lhs rhs))
 
   (define (p s)
-    (parameterize ([current-input-port (open-input-string s "M")])
-      (parse infix-dispatch
-             how-to-group)))
+    (parameterize ([current-input-port (open-input-string s "M")]
+                   [current-infix-dispatch infix-dispatch]
+                   [current-how-to-group how-to-group])
+      (parse)))
 
   (check-equal? (p "Foo.bar") (Global "Foo" "bar"))
   (check-equal? (p "bar.42") (Local "bar" 42))
