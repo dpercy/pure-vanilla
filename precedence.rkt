@@ -111,7 +111,6 @@
        (if (or (can-reach? neighbors b-rep a-rep)
                (can-reach? neighbors a-rep b-rep))
            (error 'precedence "cycle with ~v and ~v" a b)
-           ; TODO update both reps and neighbors
            ; TODO generate test case about why updating neighbors is important
            ; use A as the new representative: make B point to A everywhere
            (let* ([representatives (hash-set representatives b a-rep)]
