@@ -125,10 +125,12 @@
                   ;  a == b
                   ;    a -> [q, w, z]
                   ; 1. update values
-                  [neighbors (hash-map-values (match-lambda
-                                                [(== b-rep) a-rep]
-                                                [v v])
-                                              representatives)]
+                  [neighbors (hash-map-values (lambda (ns)
+                                                (map (match-lambda
+                                                       [(== b-rep) a-rep]
+                                                       [v v])
+                                                     ns))
+                                              neighbors)]
                   ; 2. update keys
                   [neighbors (hash-set neighbors
                                        a-rep
@@ -218,16 +220,25 @@
 
 (define/contract (query-prec graph left right) (-> Graph? any/c any/c
                                                    (or/c 'left 'right 'equal #false))
-  'TODO
-  ; 1. are the operators in the same equivalence class?
-  ; 2. is one equivalence class adjacent to the other?
-  )
+  (match-define (Graph representatives neighbors _) graph)
+  (define left-rep (hash-ref representatives left left))
+  (define right-rep (hash-ref representatives right right))
+  (cond
+    ; 1. are the operators in the same equivalence class?
+    [(equal? left-rep right-rep) 'equal]
+    ; 2. is one equivalence class adjacent to the other?
+    [(set-member? (hash-ref neighbors left-rep '()) right-rep) 'left]
+    [(set-member? (hash-ref neighbors right-rep '()) left-rep) 'right]
+    [else #false]))
 
 (define/contract (query-assoc graph op) (-> Graph? any/c (or/c 'left 'right #false))
-  'TODO
-  )
+  (match-define (Graph _ _ assocs) graph)
+  (cond
+    [(set-member? assocs (AssocLeft op)) 'left]
+    [(set-member? assocs (AssocRight op)) 'right]
+    [else #false]))
 
-#;
+
 (module+ test
 
 
@@ -259,7 +270,7 @@
 
   (check-equal? (resolve-precedence g1 '^ '^) 'right)
 
-  (define g2 (add-fact g1 (Tighter '+ '^)))
+  (define g2 (add-fact g1 (Tighter '^ '+)))
 
   (check-equal? (resolve-precedence g2 '+ '^) 'right)
   (check-equal? (resolve-precedence g2 '^ '+) 'left)
