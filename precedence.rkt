@@ -2,6 +2,7 @@
 
 (provide empty-graph
          add-fact
+         graph
          Tighter Tighter?
          Equal Equal?
          AssocLeft AssocLeft?
@@ -171,11 +172,12 @@
   (for/hash ([{k v} (in-hash h)])
     (values k (f v))))
 
-(module+ test
-  (define (graph . facts)
+(define (graph . facts)
     (for/fold ([g (empty-graph)]) ([f facts])
       (add-fact g f)))
 
+(module+ test
+  
   (check-exn exn:fail?
              (lambda () (graph (AssocLeft 'x)
                                (AssocRight 'x)))

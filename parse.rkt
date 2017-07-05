@@ -5,7 +5,8 @@
          )
 
 (require "constructor.rkt"
-         "ast.rkt")
+         "ast.rkt"
+         "precedence.rkt")
 
 
 #|
@@ -187,11 +188,15 @@ E ( E , ... )           -- call
     [(? string? s) s]
     ['string "Main"]))
 
-; TODO replace these with more specific parameters: sets of precedence rules,
-;   and let the parser do smart things to resolve them.
-(define current-infix-dispatch (make-parameter (lambda (tok) 'illegal)))
-(define current-how-to-group (make-parameter (lambda (a b) 'illegal)))
 (define current-bare-locals (make-parameter (set))) ; setof string
+(define current-precedence-graph (make-parameter (empty-graph)))
+
+; TODO install better defaults for infix rules / parselets:
+;  - by default, identifiers use the "identifier" prefix parselet
+;  - by default, operators use the "operator" infix parselet and "operator" prefix parselet
+;  - both identifiers and operators can be defined as a parselet
+(define current-infix-dispatch (make-parameter (lambda (tok) 'illegal)))
+
 
 ; conveniences for common parsing patterns
 (define (peek? pred-or-tok)
@@ -261,18 +266,19 @@ E ( E , ... )           -- call
                 ['illegal (error 'parse "Not defined as an infix operator: ~v" op)]
                 [(? procedure?)
                  (for/and ([other ops])
-                   (match ((current-how-to-group) other op)
+                   (match (resolve-precedence (current-precedence-graph)
+                                              other
+                                              op)
                      ; The left operator binds tighter, so just return.
                      ['left #false]
                      ; The right operator binds tighter;
                      ; if it binds tigher than all operators in the context, we can
                      ; keep parsing with right-recursion.
                      ['right #true]
-                     ['illegal
+                     [#false
                       (error 'parse
                              "No precedence defined for ~v and ~v; use parentheses to disambiguate"
-                             other op)]
-                     [v (error 'parse "how-to-group returned an invalid value: ~v" v)]))]))
+                             other op)]))]))
      (let ()
        (define op (Global mod name))
        (define parselet ((current-infix-dispatch) op))
@@ -337,36 +343,18 @@ E ( E , ... )           -- call
       [(Global "M" "or") parselet:or]
       [_ 'illegal]))
 
-  (define (how-to-group a b)
-    (match* {a b}
-      ; Parse does not compute transitive cases from this function.
-      ; This function must be explicit in every case.
-      [{(Global "M" "*") (Global "M" "+")} 'left]
-      [{(Global "M" "+") (Global "M" "*")} 'right]
+  (define precs
+    (graph (Tighter (Global "M" "^") (Global "M" "*"))
+           (Tighter (Global "M" "*") (Global "M" "+"))
+           (Tighter (Global "M" "^") (Global "M" "+"))
 
-      [{(Global "M" "^") (Global "M" "*")} 'left]
-      [{(Global "M" "*") (Global "M" "^")} 'right]
+           (Equal (Global "M" "+") (Global "M" "-"))
+           (AssocLeft (Global "M" "+"))
+           (AssocLeft (Global "M" "-"))
 
-      [{(Global "M" "^") (Global "M" "+")} 'left]
-      [{(Global "M" "+") (Global "M" "^")} 'right]
+           (AssocRight (Global "M" "$"))
 
-      ; Technically I should have 4 more cases with "-", but I'm not testing those cases.
-
-      ; Cases for "+" and "-" chaining
-      [{(Global "M" "+") (Global "M" "+")} 'left]
-      [{(Global "M" "-") (Global "M" "-")} 'left]
-      [{(Global "M" "+") (Global "M" "-")} 'left]
-      [{(Global "M" "-") (Global "M" "+")} 'left]
-
-      ; Example right-associative operator
-      [{(Global "M" "$") (Global "M" "$")} 'right]
-
-      ; "and" binds tighter than "or"
-      [{(Global "M" "and") (Global "M" "or")} 'left]
-      [{(Global "M" "or") (Global "M" "and")} 'right]
-
-      ; If no rules cover this pair of operators, user must disambiguate.
-      [{_ _} 'illegal]))
+           (Tighter (Global "M" "and") (Global "M" "or"))))
 
   (tag-structs
    "Logic"
@@ -382,7 +370,7 @@ E ( E , ... )           -- call
   (define (p s)
     (parameterize ([current-input-port (open-input-string s "M")]
                    [current-infix-dispatch infix-dispatch]
-                   [current-how-to-group how-to-group])
+                   [current-precedence-graph precs])
       (parse-expression)))
 
   (check-equal? (p "Foo.bar") (Global "Foo" "bar"))
