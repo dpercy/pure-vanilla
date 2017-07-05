@@ -63,108 +63,146 @@
  (AssocLeft a) ; fact about one op
  (AssocRight a) ; fact about one op
 
- (Graph facts)
- )
+ (Graph representatives ; hash( vertex -> vertex )
+        neighbors ; hash( vertex -> vertex )
+        assocs ; setof AssocLeft/AssocRight
+        ))
 
 (define Fact?
   (or/c Tighter? Equal? AssocLeft? AssocRight?))
 
 
 (define/contract (empty-graph) (-> Graph?)
-  (Graph (set)))
+  (Graph (hash)
+         (hash)
+         (set)))
 
 (define/contract (add-fact g fact) (-> Graph? Fact? Graph?)
-  (match g
-    [(Graph facts) (checked-Graph (set-add facts fact))]))
+  (match-define (Graph representatives neighbors assocs) g)
+  (match fact
+    [(AssocLeft op) (if (set-member? assocs (AssocRight op))
+                        (error 'precedence "~v cannot be both left and right associative" op)
+                        (Graph representatives neighbors (set-add assocs fact)))]
+    [(AssocRight op) (if (set-member? assocs (AssocLeft op))
+                         (error 'precedence "~v cannot be both left and right associative" op)
+                         (Graph representatives neighbors (set-add assocs fact)))]
+    [(Tighter a b)
+     ; new edge a -> b creates a cycle:
+     ; - if path b ---> a already exists
+     ; - if a == b is already known
+     (let ([a-rep (hash-ref representatives a a)]
+           [b-rep (hash-ref representatives b b)])
+       (cond
+         [(equal? a-rep b-rep) (error 'precedence "cycle with ~v and ~v" a b)]
+         [(can-reach? neighbors b-rep a-rep) (error 'precedence "cycle with ~v and ~v" a b)]
+         [else
+          (Graph representatives
+                 (hash-set neighbors
+                           a-rep
+                           (set-add (hash-ref neighbors a-rep '())
+                                    b-rep))
+                 assocs)]))]
+    [(Equal a b)
+     ; new equivalence a == b creates a cycle if a and b are already different,
+     ; that is, if path b ---> a OR path a ---> b already exists
+     (let ([a-rep (hash-ref representatives a a)]
+           [b-rep (hash-ref representatives b b)])
+       (if (or (can-reach? neighbors b-rep a-rep)
+               (can-reach? neighbors a-rep b-rep))
+           (error 'precedence "cycle with ~v and ~v" a b)
+           ; TODO update both reps and neighbors
+           ; TODO generate test case about why updating neighbors is important
+           ; use A as the new representative: make B point to A everywhere
+           (let* ([representatives (hash-set representatives b a-rep)]
+                  [representatives (hash-map-values (match-lambda
+                                                      [(== b-rep) a-rep]
+                                                      [v v])
+                                                    representatives)]
+                  ; any values in neighbors need to be updated
+                  ; any keys need to be updated and merged!
+                  ;    a -> [q, z]
+                  ;    b -> [w, z]
+                  ;  a == b
+                  ;    a -> [q, w, z]
+                  ; 1. update values
+                  [neighbors (hash-map-values (match-lambda
+                                                [(== b-rep) a-rep]
+                                                [v v])
+                                              representatives)]
+                  ; 2. update keys
+                  [neighbors (hash-set neighbors
+                                       a-rep
+                                       (set-union (hash-ref neighbors a-rep '())
+                                                  (hash-ref neighbors b-rep '())))]
+                  [neighbors (hash-remove neighbors b-rep)])
+             (Graph representatives
+                    neighbors
+                    assocs))))]))
 
-(define/contract (checked-Graph facts) (-> (set/c Fact?) Graph?)
-  ; checks the graph for consistency:
-  ; - each operator must have at most one associativity
-  ; - cycles are not allowed
-  (check-dup-assoc! facts)
-  (check-cycles! facts)
-  (Graph facts))
-
-(define (check-dup-assoc! facts)
-  (for ([fact facts])
-    (match fact
-      [(AssocLeft op) #:when (set-member? facts (AssocRight op))
-       (error 'precedence "~v cannot be both left and right associative" op)]
-      [_ (void)])))
+(define (can-reach? neighbors start end [seen (set)])
+  ; does a nonempty path exist from start to end?
+  (cond
+    [(set-member? seen start) #false]
+    [else (let ([seen (set-add seen start)])
+            (for/or ([n (hash-ref neighbors start '())])
+              (or (equal? n end)
+                  (can-reach? neighbors n end seen))))]))
 (module+ test
+  (let ()
+    (define g (hash 'a '(x)
+                    'x '(x y)
+                    'y '(z)))
+    ; self edges must be explicit
+    (check-equal? (can-reach? g 'a 'a) #false)
+    (check-equal? (can-reach? g 'x 'x) #true)
+    ; simple edges
+    (check-equal? (can-reach? g 'a 'x) #true)
+    (check-equal? (can-reach? g 'x 'y) #true)
+    (check-equal? (can-reach? g 'y 'z) #true)
+    ; no edge
+    (check-equal? (can-reach? g 'x 'a) #false)
+    ; transitive cases
+    (check-equal? (can-reach? g 'x 'z) #true)
+    (check-equal? (can-reach? g 'a 'z) #true)))
+
+(define (hash-map-values f h)
+  (for/hash ([{k v} (in-hash h)])
+    (values k (f v))))
+
+(module+ test
+  (define (graph . facts)
+    (for/fold ([g (empty-graph)]) ([f facts])
+      (add-fact g f)))
+
   (check-exn exn:fail?
-             (lambda () (check-dup-assoc! (set (AssocLeft 'x)
-                                               (AssocRight 'x))))
+             (lambda () (graph (AssocLeft 'x)
+                               (AssocRight 'x)))
              "left and right")
-  (check-not-exn (lambda () (check-dup-assoc! (set (AssocLeft 'x)))))
-  (check-not-exn (lambda () (check-dup-assoc! (set (AssocRight 'x)))))
-  (check-not-exn (lambda () (check-dup-assoc! (set (AssocRight 'x) (AssocRight 'x)))))
-  (check-not-exn (lambda () (check-dup-assoc! (set (AssocLeft 'y) (AssocRight 'z))))))
 
-
-(define (check-cycles! facts)
-  ; 1. choose a representative operator from each DAG node
-  (define representative
-    (for/fold ([h (hash)]) ([fact facts]
-                            #:when (Equal? fact))
-      (match-define (Equal a b) fact)
-      (let ([a (hash-ref h a a)]
-            [b (hash-ref h b b)])
-        ; update the hash table with:
-        ; a -> b
-        ; forall existing rules x -> a; put x -> b.
-        (let ([h (hash-set h a b)])
-          (for/hash ([{k v} (in-hash h)])
-            (values k (if (equal? v a)
-                          b
-                          v)))))))
-  ; 2. rewrite edges using representative operators
-  (define edges
-    (for/set ([fact facts]
-              #:when (Tighter? fact))
-      (match fact
-        [(Tighter a b)
-         (Tighter (hash-ref representative a a)
-                  (hash-ref representative b b))])))
-  (define neighbors
-    (for/fold ([h (hash)]) ([e edges])
-      (match e
-        [(Tighter a b) (hash-set h a
-                                 (cons b
-                                       (hash-ref h a '())))])))
-  ; 3. cycle detect the graph of operators
-  (for ([vertex (in-hash-keys neighbors)])
-    ; TODO memoize recur!
-    (let recur ([vertex vertex]
-                [seen (set)])
-      (if (set-member? seen vertex)
-          (error 'precedence "cycle involving ~v" vertex)
-          (let ([seen (set-add seen vertex)])
-            (for ([neighbor (hash-ref neighbors vertex '())])
-              (recur neighbor seen)))))))
-(module+ test
   ; directed cycles
   (check-exn exn:fail?
-             (lambda () (check-cycles! (set (Tighter 'x 'x))))
+             (lambda () (graph (Tighter 'x 'x)))
              "cycle")
   (check-exn exn:fail?
-             (lambda () (check-cycles! (set (Tighter 'x 'y)
-                                            (Tighter 'y 'x))))
+             (lambda () (graph (Tighter 'x 'y)
+                               (Tighter 'y 'x)))
              "cycle")
   (check-exn exn:fail?
-             (lambda () (check-cycles! (set (Tighter 'x 'y)
-                                            (Tighter 'y 'z)
-                                            (Tighter 'z 'x))))
+             (lambda () (graph (Tighter 'x 'y)
+                               (Tighter 'y 'z)
+                               (Tighter 'z 'x)))
              "cycle")
 
   ; cycle involving an Equal edge
   (check-exn exn:fail?
-             (lambda () (check-cycles! (set (Tighter 'x 'y)
-                                            (Equal 'x 'y))))
+             (lambda () (graph (Tighter 'x 'y)
+                               (Equal 'x 'y)))
              "cycle")
 
 
+  ;;
   )
+
 
 
 (define/contract (resolve-precedence graph left right) (-> Graph? any/c any/c
@@ -191,9 +229,7 @@
 
 #;
 (module+ test
-  (define (graph . facts)
-    (for/fold ([g (empty-graph)]) ([f facts])
-      (add-fact g f)))
+
 
   (define g1
     (graph (AssocLeft '+)
