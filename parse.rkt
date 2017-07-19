@@ -1,6 +1,7 @@
 #lang racket
 
 (provide parse-expression
+         parse-statements
          parselet:infix-call
          )
 
@@ -323,7 +324,7 @@ E ( E , ... )           -- call
 
 (define (parse-block)
   (expect! (Open))
-  (define e (parse-expression))
+  (define e (parse-expression)) ; TODO parse-statements?
   (expect! (Close))
   e)
 
@@ -463,4 +464,23 @@ E ( E , ... )           -- call
   (check-equal? (p "fn(and) -> and") (Func (list (Local "and" #f)) (Local "and" #f)))
 
   ;;
+  )
+
+
+
+(define (parse-statements)
+
+  )
+(module+ test
+
+  (define (pp s)
+    (parameterize ([current-input-port (open-input-string s "M")]
+                   [current-infix-dispatch infix-dispatch]
+                   [current-precedence-graph precs])
+      (parse-statements)))
+
+  (check-equal? (pp "") (list))
+  (check-equal? (pp "1\n2") (list (Lit 1) (Lit 2)))
+  (check-equal? (pp "x = 1") (list (Def (Global "M" "x") (Lit 1))))
+
   )
