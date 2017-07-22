@@ -19,6 +19,22 @@ x
 
 |#
 
+
+
+#|
+
+TODO hygiene
+Hygiene involves renaming identifiers to avoid collisions.
+See that Dybvig paper.
+Try to keep it simple by putting hygiene info only on identifiers.
+Try to make it transparent by printing all the hygiene info concisely.
+For super-simplicity, implement "mark" by just appending to the symbol!
+
+
+|#
+
+
+
 (define (atom? v)
   (and (not (symbol? v))
        (not (empty? v))
