@@ -10,10 +10,10 @@ Idea:
 
 core:
 x
+(quote v)
 (lambda (x ...) e)
 (e e ...)
 (if e e e)
-(quote v)
 
 
 
@@ -30,51 +30,99 @@ Try to keep it simple by putting hygiene info only on identifiers.
 Try to make it transparent by printing all the hygiene info concisely.
 For super-simplicity, implement "mark" by just appending to the symbol!
 
-
 |#
 
 
+(struct Expr () #:transparent)
+(struct Quote Expr (value) #:transparent)
+(struct Var Expr (name) #:transparent)
+(struct Lambda Expr (param-names body) #:transparent)
+(struct If Expr (test consq alt) #:transparent)
+(struct Call Expr (func args) #:transparent)
 
-(define (atom? v)
-  (and (not (symbol? v))
-       (not (empty? v))
-       (not (cons? v))))
 
-(define default-interpretation
-  ; primitives call expand on each subform
-  (hash 'quote (match-lambda [(and form (list 'quote _)) form])
-        'lambda (match-lambda [(list 'lambda (list (? symbol? args) ...) body)
-                               `(lambda (,@args) ,(expand body))])
-        'if (match-lambda [(list 'if test consq alt)
-                           `(if ,(expand test) ,(expand consq) ,(expand alt))])
-        'call (match-lambda [(list* 'call func args)
-                             `(,(expand func) ,@(map expand args))])
-        'var (match-lambda [(list 'var x) x])))
-(define current-interpretation (make-parameter default-interpretation))
 
-(define (expand form)
+(define self-quoting?
+  (not/c (or/c symbol?
+               empty?
+               cons?
+               void?)))
+
+
+(define (core-prim-handler form fallback)
   (match form
-    [(? atom?)   (apply-prim 'quote (list 'quote form))]
-    [(? symbol?) (apply-prim 'var   (list 'var   form))]
-    [(cons (? prim? head) _) (apply-prim head form)]
-    [(cons 'and _) (expand (macro-and form))]
-    [(cons 'let _) (expand (macro-let form))]
-    [(cons _ _) (apply-prim 'call (cons 'call form))]
-    ['() (error 'expand "empty parens not allowed")]))
+    [(list 'var x) (Var x)]
+    [(list 'quote v) (Quote v)]
+    [(list 'lambda (? (listof symbol?) param-names) body) (Lambda param-names (parse body))]
+    [(list* 'call func args) (Call (parse func) (map parse args))]
+    [(list 'if t c a) (If (parse t) (parse c) (parse a))]
+    [_ (fallback)]))
 
-(define (prim? v)
-  (and (symbol? v)
-       (hash-has-key? (current-interpretation) v)))
+(define current-prim-handler (make-parameter core-prim-handler))
 
-(define (apply-prim head form)
-  (define h (hash-ref (current-interpretation)
-                      head
-                      (lambda ()
-                        (error 'expand
-                               "~v is not defined as a primitive. Valid primtives are: ~v"
-                               head
-                               (hash-keys (current-interpretation))))))
-  (h form))
+#|
+
+parse drives the expander:
+It's trying to convert the s-expression to something else.
+When it hits a primitive form, it knows how to parse it.
+Otherwise, it tries to call a macro.
+
+|#
+(define (parse form)
+  ; 1. If the current prim handler knows how to compile this form, let it do so.
+  ((current-prim-handler)
+   form
+   (lambda ()
+     ; 2. Otherwise, try to reduce this form to something it can compile.
+     (match form
+       ; if the head is a primitive keyword, and the prim handler didn't compile it,
+       ; it's an error of some kind:
+       ; - maybe a syntax error
+       ; - maybe a hole in the current prim handler
+       [(cons (and head (or 'var 'quote 'lambda 'call 'if)) _)
+        (error 'expand "~v: bad syntax: ~v" head form)]
+
+
+       ; if head is a macro keyword, expand it
+       [(cons 'and _) (parse (macro-and form))]
+       [(cons 'let _) (parse (macro-let form))]
+
+       ; if head is not a macro, desugar by adding one
+       [(? self-quoting?) (parse (list 'quote form))]
+       [(? symbol?)       (parse (list 'var   form))]
+       [(cons _ _)        (parse (cons 'call form))]
+
+       ['() (error 'expand "empty parens not allowed")]))))
+
+
+; Pseudo-macros do all the error-checking that a macro would,
+; but they can't expand to anything, because they represent primitives.
+; They all return void, to remind you not to keep expanding the result.
+
+(define (pseudo-macro-var form)
+  (match form
+    [(list 'var (? symbol?)) (void)]
+    [_ (error 'expand "var: bad syntax: ~v" form)]))
+
+(define (pseudo-macro-quote form)
+  (match form
+    [(list 'quote _) (void)]
+    [_ (error 'expand "quote: bad syntax: ~v" form)]))
+
+(define (pseudo-macro-lambda form)
+  (match form
+    [(list 'lambda (? (listof symbol?)) _) (void)]
+    [_ (error 'expand "lambda: bad syntax: ~v" form)]))
+
+(define (pseudo-macro-call form)
+  (match form
+    [(list* 'call func args) (void)]
+    [_ (error 'expand "call: bad syntax: ~v" form)]))
+
+(define (pseudo-macro-if form)
+  (match form
+    [(list 'if test consq alt) (void)]
+    [_ (error 'expand "if: bad syntax: ~v" form)]))
 
 
 (define (macro-and form)
@@ -93,51 +141,45 @@ For super-simplicity, implement "mark" by just appending to the symbol!
   (require rackunit)
 
   ; example elaborating surface scheme to core scheme
-  (check-equal? (expand '(let ([x 1]) (g (and x (f 4)))))
-                '((lambda (x) (g (if x (f '4) '#false)))
-                  '1))
+  (check-equal? (parse '(let ([x 1]) (g (and x (f 4)))))
+                (Call (Lambda '(x)
+                              (Call (Var 'g)
+                                    (list (If (Var 'x)
+                                              (Call (Var 'f) (list (Quote 4)))
+                                              (Quote #false)))))
+                      (list (Quote 1))))
 
   ; elaborate to JS
-  (check-equal? (parameterize ([current-interpretation
-                                (hash
-                                 'var (match-lambda
-                                        [(list 'var x) (symbol->string x)])
-                                 'quote (match-lambda
-                                          [(list 'quote (? number? n)) (number->string n)])
-                                 'lambda (match-lambda
-                                           [(list 'lambda params body)
-                                            (string-append "function("
-                                                           (apply string-append
-                                                                  (add-between (map expand params)
-                                                                               ", "))
-                                                           ") { return "
-                                                           (expand body)
-                                                           "; }")])
-                                 'call (match-lambda
-                                         [(list* 'call func args)
-                                          (string-append "("
-                                                         (expand func)
-                                                         ")("
-                                                         (apply string-append
-                                                                (add-between (map expand args)
-                                                                             ", "))
-                                                         ")")])
-                                 'and (match-lambda
-                                        [(list* 'and args)
-                                         (string-append "("
-                                                        (apply string-append
-                                                               (add-between (map expand args)
-                                                                            " && "))
-                                                        ")")]))])
-                  (expand '(let ([x 1]) (g (and x (f 4))))))
+  (define (js-prim-handler form fallback)
+    (match form
+      [(list 'var x) (symbol->string x)]
+      [(list 'quote (? number? n)) (number->string n)]
+      [(list 'lambda params body)
+       (string-append "function("
+                      (apply string-append
+                             (add-between (map parse params)
+                                          ", "))
+                      ") { return "
+                      (parse body)
+                      "; }")]
+      [(list* 'call func args)
+       (string-append "("
+                      (parse func)
+                      ")("
+                      (apply string-append
+                             (add-between (map parse args)
+                                          ", "))
+                      ")")]
+      [(list* 'and args)
+       (string-append "("
+                      (apply string-append
+                             (add-between (map parse args)
+                                          " && "))
+                      ")")]
+      [_ (fallback)]))
+  (check-equal? (parameterize ([current-prim-handler js-prim-handler])
+                  (parse '(let ([x 1]) (g (and x (f 4))))))
                 "(function(x) { return (g)((x && (f)(4))); })(1)")
-
-  ; TODO What enforces prims' shape when they're customized?
-  ;      A stupid custom quote could accept zero or two args.
-  ;      This isn't good.
-  ;      Customizations should only change the expansion,
-  ;        not the validation
-
 
   ;;
   )
