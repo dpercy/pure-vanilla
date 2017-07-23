@@ -181,5 +181,77 @@ Otherwise, it tries to call a macro.
                   (parse '(let ([x 1]) (g (and x (f 4))))))
                 "(function(x) { return (g)((x && (f)(4))); })(1)")
 
+  (define (mongo-prim-handler form fallback)
+    ; This prim handler tries to parse the form as a find(_) query:
+    ; a predicate on documents.
+    (match form
+      ; The form has to be a 1-arg lambda.
+      [(list 'lambda (list param) body)
+       (parameterize ([current-prim-handler (doc-simple-predicate param)])
+         (parse body))]
+      [_ (fallback)]))
+  (define ((doc-simple-predicate doc-iden) form fallback)
+    (match form
+      [(list 'call (and cmp (or 'equal? '>))
+             (list 'hash-ref
+                   (== doc-iden)
+                   (list 'quote fieldname))
+             (list 'quote val))
+       (hash fieldname (hash (match cmp ['equal? '$eq] ['> '$gt])
+                             val))]
+      [_ (fallback)]))
+  (parameterize ([current-prim-handler mongo-prim-handler])
+    (check-equal? (parse '(lambda (doc) (equal? (hash-ref doc 'x) '"foo")))
+                  (hash 'x (hash '$eq "foo")))
+
+    ; TODO bug here
+    ; This case is identical to the previous, except for removing the quote
+    ; around "foo". This is basically saying the matcher doens't understand synonyms!
+    ; Solutions:
+    ;  - tree where every subtree remembers history
+    ;  - match pattern that says "eventually expands to"
+    ;     - step until subpattern succeeds; otherwise fail
+    ;     - memoize to avoid redundant work
+    ;     - may need to use the pattern to guide expansion:
+    ;         - if the root already matches, stop expanding that part
+    ;         i.e. (and (if 1 2 #f) 3 #f)
+    ;         problem: expander doesn't know how to recur inside and
+
+
+    #|
+
+
+    Each subtree doesn't have a linear history:
+    (print-twice x) -> (begin (displayln x) (displayln x))
+    But each subtree in the output has at most one predecessor.
+
+    #0=(and #1=(and x y) z)
+    #2=(if #1=(and x y) z #f)
+    #3=(if #4=(if x y #f) z #f)
+
+    0 becomes 2
+    2 becomes 3
+    1 becomes 4
+
+    match #0=(and #1=(and x y) z) (and (if _ _ _) _)
+    unpack
+    match #1=(and x y) (if _ _ _)
+    1 becomes 4
+    match #4=(if x y #f) (if _ _ _)
+
+
+
+    |#
+    (check-equal? (parse '(lambda (doc) (equal? (hash-ref doc 'x) "foo")))
+                  (hash 'x (hash '$eq "foo")))
+
+
+
+    (check-equal? (parse '(lambda (doc) (> (hash-ref doc 'x) '5)))
+                  (hash 'x (hash '$gt 5)))
+    (check-equal? (parse '(lambda (doc) (> (hash-ref doc 'x) 5)))
+                  (hash 'x (hash '$gt 5)))
+    )
+
   ;;
   )
