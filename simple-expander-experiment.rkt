@@ -1,6 +1,8 @@
 #lang racket
 
 
+(require (only-in racket/generator in-generator yield))
+(require (only-in alexis/collection sequence))
 #|
 
 Idea:
@@ -33,14 +35,6 @@ For super-simplicity, implement "mark" by just appending to the symbol!
 |#
 
 
-(struct Expr () #:transparent)
-(struct Quote Expr (value) #:transparent)
-(struct Var Expr (name) #:transparent)
-(struct Lambda Expr (param-names body) #:transparent)
-(struct If Expr (test consq alt) #:transparent)
-(struct Call Expr (func args) #:transparent)
-
-
 
 (define self-quoting?
   (not/c (or/c symbol?
@@ -48,81 +42,53 @@ For super-simplicity, implement "mark" by just appending to the symbol!
                cons?
                void?)))
 
+(define current-step-table (make-parameter #f))
 
-(define (core-prim-handler form fallback)
+; Step either expands the form forward by 1 step,
+; or returns void to indicate the form is already fully expanded.
+(define (step form)
+  (match (current-step-table)
+    [#false (step-impl form)]
+    [tbl (hash-ref! tbl form (lambda () (step-impl form)))]))
+(define (step-impl form)
   (match form
-    [(list 'var x) (Var x)]
-    [(list 'quote v) (Quote v)]
-    [(list 'lambda (? (listof symbol?) param-names) body) (Lambda param-names (parse body))]
-    [(list* 'call func args) (Call (parse func) (map parse args))]
-    [(list 'if t c a) (If (parse t) (parse c) (parse a))]
-    [_ (fallback)]))
+    ; primitive cases
+    [(? symbol?)       (void)]
+    [(? self-quoting?) (list 'quote form)]
+    [(list 'quote _)   (void)]
+    [(list 'lambda (? (listof symbol?) params) body) (match (step body)
+                                                       [(? void?) (void)]
+                                                       [body `(lambda ,params ,body)])]
+    [(list 'if t c a)  (match (step-first-in-list (list t c a))
+                         [(? void?) (void)]
+                         [(list t c a) `(if ,t ,c ,a)])]
+    [(cons (and head (or 'quote 'lambda 'if)) _)
+     (error 'expand "~v: bad syntax: ~v" head form)]
 
-(define current-prim-handler (make-parameter core-prim-handler))
+    ; if head is a macro keyword, apply the macro
+    [(cons 'and _) (macro-and form)]
+    [(cons 'let _) (macro-let form)]
 
-#|
+    ; otherwise it's a call.
+    ; Calls just expand their children.
+    [(cons _ _) (step-first-in-list form)]
 
-parse drives the expander:
-It's trying to convert the s-expression to something else.
-When it hits a primitive form, it knows how to parse it.
-Otherwise, it tries to call a macro.
+    ['() (error 'expand "empty parens not allowed")]))
+(define (step-first-in-list forms)
+  ; If any form in the list can step, return a new list with that one stepped.
+  ; Otherwise return void.
+  (match forms
+    ['() (void)]
+    [(cons first rest) (match (step first)
+                         [(? void?) (match (step-first-in-list rest)
+                                      [(? void?) (void)]
+                                      [rest (cons first rest)])]
+                         [first (cons first rest)])]))
 
-|#
-(define (parse form)
-  ; 1. If the current prim handler knows how to compile this form, let it do so.
-  ((current-prim-handler)
-   form
-   (lambda ()
-     ; 2. Otherwise, try to reduce this form to something it can compile.
-     (match form
-       ; if the head is a primitive keyword, and the prim handler didn't compile it,
-       ; it's an error of some kind:
-       ; - maybe a syntax error
-       ; - maybe a hole in the current prim handler
-       [(cons (and head (or 'var 'quote 'lambda 'call 'if)) _)
-        (error 'expand "~v: bad syntax: ~v" head form)]
-
-
-       ; if head is a macro keyword, expand it
-       [(cons 'and _) (parse (macro-and form))]
-       [(cons 'let _) (parse (macro-let form))]
-
-       ; if head is not a macro, desugar by adding one
-       [(? self-quoting?) (parse (list 'quote form))]
-       [(? symbol?)       (parse (list 'var   form))]
-       [(cons _ _)        (parse (cons 'call form))]
-
-       ['() (error 'expand "empty parens not allowed")]))))
-
-
-; Pseudo-macros do all the error-checking that a macro would,
-; but they can't expand to anything, because they represent primitives.
-; They all return void, to remind you not to keep expanding the result.
-
-(define (pseudo-macro-var form)
-  (match form
-    [(list 'var (? symbol?)) (void)]
-    [_ (error 'expand "var: bad syntax: ~v" form)]))
-
-(define (pseudo-macro-quote form)
-  (match form
-    [(list 'quote _) (void)]
-    [_ (error 'expand "quote: bad syntax: ~v" form)]))
-
-(define (pseudo-macro-lambda form)
-  (match form
-    [(list 'lambda (? (listof symbol?)) _) (void)]
-    [_ (error 'expand "lambda: bad syntax: ~v" form)]))
-
-(define (pseudo-macro-call form)
-  (match form
-    [(list* 'call func args) (void)]
-    [_ (error 'expand "call: bad syntax: ~v" form)]))
-
-(define (pseudo-macro-if form)
-  (match form
-    [(list 'if test consq alt) (void)]
-    [_ (error 'expand "if: bad syntax: ~v" form)]))
+(define (expand form)
+  (match (step form)
+    [(? void?) form]
+    [form (expand form)]))
 
 
 (define (macro-and form)
@@ -140,118 +106,55 @@ Otherwise, it tries to call a macro.
 (module+ test
   (require rackunit)
 
-  ; example elaborating surface scheme to core scheme
-  (check-equal? (parse '(let ([x 1]) (g (and x (f 4)))))
-                (Call (Lambda '(x)
-                              (Call (Var 'g)
-                                    (list (If (Var 'x)
-                                              (Call (Var 'f) (list (Quote 4)))
-                                              (Quote #false)))))
-                      (list (Quote 1))))
 
-  ; elaborate to JS
-  (define (js-prim-handler form fallback)
-    (match form
-      [(list 'var x) (symbol->string x)]
-      [(list 'quote (? number? n)) (number->string n)]
-      [(list 'lambda params body)
-       (string-append "function("
-                      (apply string-append
-                             (add-between (map parse params)
-                                          ", "))
-                      ") { return "
-                      (parse body)
-                      "; }")]
-      [(list* 'call func args)
-       (string-append "("
-                      (parse func)
-                      ")("
-                      (apply string-append
-                             (add-between (map parse args)
-                                          ", "))
-                      ")")]
-      [(list* 'and args)
-       (string-append "("
-                      (apply string-append
-                             (add-between (map parse args)
-                                          " && "))
-                      ")")]
-      [_ (fallback)]))
-  (check-equal? (parameterize ([current-prim-handler js-prim-handler])
-                  (parse '(let ([x 1]) (g (and x (f 4))))))
-                "(function(x) { return (g)((x && (f)(4))); })(1)")
+  (check-equal? (expand 'x) 'x)
+  (check-equal? (expand '(f x)) '(f x))
+  (check-equal? (expand '(if a b c)) '(if a b c))
+  (check-equal? (expand '(and (and a b) c)) '(if (if a b '#f) c '#f))
 
-  (define (mongo-prim-handler form fallback)
-    ; This prim handler tries to parse the form as a find(_) query:
-    ; a predicate on documents.
-    (match form
-      ; The form has to be a 1-arg lambda.
-      [(list 'lambda (list param) body)
-       (parameterize ([current-prim-handler (doc-simple-predicate param)])
-         (parse body))]
-      [_ (fallback)]))
-  (define ((doc-simple-predicate doc-iden) form fallback)
-    (match form
-      [(list 'call (and cmp (or 'equal? '>))
-             (list 'hash-ref
-                   (== doc-iden)
-                   (list 'quote fieldname))
-             (list 'quote val))
-       (hash fieldname (hash (match cmp ['equal? '$eq] ['> '$gt])
-                             val))]
-      [_ (fallback)]))
-  (parameterize ([current-prim-handler mongo-prim-handler])
-    (check-equal? (parse '(lambda (doc) (equal? (hash-ref doc 'x) '"foo")))
-                  (hash 'x (hash '$eq "foo")))
+  (check-equal? (expand '(f (and a b))) '(f (if a b '#f)))
 
-    ; TODO bug here
-    ; This case is identical to the previous, except for removing the quote
-    ; around "foo". This is basically saying the matcher doens't understand synonyms!
-    ; Solutions:
-    ;  - tree where every subtree remembers history
-    ;  - match pattern that says "eventually expands to"
-    ;     - step until subpattern succeeds; otherwise fail
-    ;     - memoize to avoid redundant work
-    ;     - may need to use the pattern to guide expansion:
-    ;         - if the root already matches, stop expanding that part
-    ;         i.e. (and (if 1 2 #f) 3 #f)
-    ;         problem: expander doesn't know how to recur inside and
+  (check-equal? (expand '(lambda () (and 1 2))) '(lambda () (if '1 '2 '#f)))
 
 
-    #|
+  ;;
+  )
 
 
-    Each subtree doesn't have a linear history:
-    (print-twice x) -> (begin (displayln x) (displayln x))
-    But each subtree in the output has at most one predecessor.
+(define (steps form)
+  (in-generator
+   (let loop ([form form])
+     (if (void? form)
+         (void) ; yield no more values
+         (begin
+           (yield form)
+           (loop (step form)))))))
+(module+ test
+  (check-equal? (sequence->list (steps '(f (and a b))))
+                '[
+                  (f (and a b))
+                  (f (if a b #f))
+                  (f (if a b '#f))
+                  ]))
 
-    #0=(and #1=(and x y) z)
-    #2=(if #1=(and x y) z #f)
-    #3=(if #4=(if x y #f) z #f)
-
-    0 becomes 2
-    2 becomes 3
-    1 becomes 4
-
-    match #0=(and #1=(and x y) z) (and (if _ _ _) _)
-    unpack
-    match #1=(and x y) (if _ _ _)
-    1 becomes 4
-    match #4=(if x y #f) (if _ _ _)
-
-
-
-    |#
-    (check-equal? (parse '(lambda (doc) (equal? (hash-ref doc 'x) "foo")))
-                  (hash 'x (hash '$eq "foo")))
-
-
-
-    (check-equal? (parse '(lambda (doc) (> (hash-ref doc 'x) '5)))
-                  (hash 'x (hash '$gt 5)))
-    (check-equal? (parse '(lambda (doc) (> (hash-ref doc 'x) 5)))
-                  (hash 'x (hash '$gt 5)))
-    )
+(define-match-expander &
+  (syntax-rules ()
+    [(_ pat) (app (lambda (initial-form)
+                    (for/first ([form (steps initial-form)]
+                                #:when (match form
+                                         [pat #true]
+                                         [_ #false]))
+                      form))
+                  pat)]))
+(module+ test
+  (check-match 'x (& 'x))
+  (check-match '1 (& '(quote 1)))
+  (check-match '(and (and a b) c) (& '(and (and a b) c)))
+  (check-match '(and (and a b) c) (& '(if (and a b) c #f)))
+  ; This one doesn't match, because (and (if )) never happened
+  (check-match '(and (and a b) c) (not (& '(and (if a b #f) c))))
+  ; But it does work if you nest the "ever steps to" pattern
+  (check-match '(and (and a b) c) (& `(and ,(& '(if a b #f)) c)))
 
   ;;
   )
