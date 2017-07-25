@@ -254,3 +254,112 @@ For super-simplicity, implement "mark" by just appending to the symbol!
 
   ;;
   )
+
+(module+ test
+
+
+  (struct Expr () #:transparent)
+  (struct Var Expr (name) #:transparent)
+  (struct Quote Expr (value) #:transparent)
+  (struct Lambda Expr (params body) #:transparent)
+  (struct Call Expr (func args) #:transparent)
+  (struct If Expr (test consq alt) #:transparent)
+  (struct Let Expr (arms body) #:transparent)
+  (struct Arm (name value) #:transparent)
+
+  (define (compile-core expr)
+    (parameterize ([current-step-table (make-weak-hasheq)])
+      (expand! expr)
+      (let r ([expr expr])
+        (match expr
+          ; specialized cases come first
+          [(& ((lambda (,params ...) ,body) ,args ...)) #:when (= (length params) (length args))
+           (Let (for/list ([p params]
+                           [a args])
+                  (Arm p (r a)))
+                (r body))]
+
+          ; general cases come last
+          [(& ,(? symbol? x)) (Var x)]
+          [(& (quote ,v)) (Quote v)]
+          ; NOTE the bug: this pattern is not general enough:
+          ; it should allow any number of params, not just one.
+          [(& (lambda (,params) ,body))  (Lambda params (r body))]
+          [(& (if ,t ,c ,a)) (If (r t) (r c) (r a))]
+          ; NOTE this compound bug: because the lambda pattern fails to match
+          ; valid examples like (lambda () 1), they fall through to the call case,
+          ; which misinterprets them.
+          [(& (,func ,args ...)) (Call (r func) (map r args))]))))
+
+  (check-equal? (compile-core '(let ([x 5])
+                                 (+ x 2)))
+                (Let (list (Arm 'x (Quote 5)))
+                     (Call (Var '+) (list (Var 'x) (Quote 2)))))
+
+  (check-exn exn:fail? (lambda () (compile-core '(if))))
+
+  ; tricky: see bugs in implementation of 'compile-core
+  ;;(check-equal? (compile-core '(lambda () 1)) (Lambda '() (Quote 1)))
+
+
+
+  (define (query expr)
+    (parameterize ([current-step-table ;;(make-weak-hasheq)
+                    (make-hash)
+                    ])
+      (expand! expr)
+      (match expr
+        [(& (lambda (,doc-id) ,body))
+         (let r ([expr body])
+           ; parse a predicate on doc-id
+           (match expr
+             [(& (quote #true)) (hash)]
+             [(& (< (hash-ref ,(== doc-id) (quote ,(? symbol? field)))
+                    (quote ,value)))
+              (hash field (hash '$lt value))]
+             [(& (< (quote ,value)
+                    (hash-ref ,(== doc-id) (quote ,(? symbol? field)))))
+              (hash field (hash '$gt value))]
+             [(& (equal? (hash-ref ,(== doc-id) (quote ,(? symbol? field)))
+                         (quote ,value)))
+              (hash field (hash '$eq value))]
+             [(& (and ,terms ...))
+              (foldr conjoin-query (hash) (map r terms))]))])))
+  (define (conjoin-query a b)
+    (for/hash ([key (set-union (hash-keys a) (hash-keys b))])
+      (values key
+              (conjoin-pred (hash-ref a key hash)
+                            (hash-ref b key hash)))))
+  (define (conjoin-pred a b)
+    (for/hash ([kv (append (hash->list a)
+                           (hash->list b))])
+      (match kv [(cons k v) (values k v)])))
+
+  (check-equal? (query '(lambda (doc) (< (hash-ref doc 'x) 4)))
+                ; {x: {$lt: 4}}
+                (hash 'x (hash '$lt 4)))
+  (check-equal? (query '(lambda (doc) (equal? (hash-ref doc 'x) "foo")))
+                ; {x: {$eq: "foo"}}
+                (hash 'x (hash '$eq "foo")))
+  (check-equal? (query '(lambda (doc) (< 10 (hash-ref doc 'x))))
+                ; {x: {$gt: 10}}
+                (hash 'x (hash '$gt 10)))
+
+  (check-equal? (query '(lambda (doc) (and (< 10 (hash-ref doc 'x))
+                                           (equal? (hash-ref doc 'y) "foo"))))
+                ; {x: {$gt: 10}, y: {$eq: "foo"}}
+                (hash 'x (hash '$gt 10)
+                      'y (hash '$eq "foo")))
+  (check-equal? (query '(lambda (doc) (and (< 10 (hash-ref doc 'y))
+                                           (equal? (hash-ref doc 'y) "foo"))))
+                ; {y: [{$gt: 10}, {$eq: "foo"}]}
+                (hash 'y (hash '$gt 10
+                               '$eq "foo")))
+
+  (check-equal? (query '(lambda (doc) #true))
+                ; {}
+                (hash))
+
+
+  ;;
+  )
