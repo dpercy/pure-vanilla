@@ -2,7 +2,6 @@
 
 
 (require (only-in racket/generator in-generator yield))
-(require (only-in alexis/collection sequence))
 #|
 
 Idea:
@@ -49,7 +48,10 @@ For super-simplicity, implement "mark" by just appending to the symbol!
 (define (step form)
   (match (current-step-table)
     [#false (step-impl form)]
-    [tbl (hash-ref! tbl form (lambda () (step-impl form)))]))
+    [tbl (hash-ref! tbl form (lambda ()
+                               (define v (step-impl form))
+                               (displayln (format "~s -> ~s" form v))
+                               v))]))
 (define (step-impl form)
   (match form
     ; primitive cases
@@ -120,41 +122,84 @@ For super-simplicity, implement "mark" by just appending to the symbol!
   ;;
   )
 
+(define (step-cached form)
+  (match (current-step-table)
+    [#false (void)]
+    [tbl (hash-ref tbl form void)]))
 
-(define (steps form)
+(define (steps-cached form)
   (in-generator
    (let loop ([form form])
      (if (void? form)
          (void) ; yield no more values
          (begin
            (yield form)
-           (loop (step form)))))))
+           (loop (step-cached form)))))))
 (module+ test
-  (check-equal? (sequence->list (steps '(f (and a b))))
-                '[
-                  (f (and a b))
-                  (f (if a b #f))
-                  (f (if a b '#f))
-                  ]))
+  (let ([form  '(f (and a b))])
+    (check-equal? (sequence->list (steps-cached form)) (list form))
+    (parameterize ([current-step-table (make-weak-hasheq)])
+      (check-equal? (sequence->list (steps-cached form)) (list form))
+      (expand form)
+      (check-equal? (sequence->list (steps-cached form))
+                    '[
+                      (f (and a b))
+                      (f (if a b #f))
+                      (f (if a b '#f))
+                      ]))))
+
+(define (expand! v)
+  (displayln "")
+  (displayln "")
+  (displayln (format "expand! ~v" v))
+  (unless (current-step-table)
+    (error 'expand! "no current-step-table"))
+  (expand v)
+  v)
+
 
 (define-match-expander &
   (syntax-rules ()
-    [(_ pat) (app (lambda (initial-form)
-                    (for/first ([form (steps initial-form)]
-                                #:when (match form
-                                         [pat #true]
-                                         [_ #false]))
-                      form))
+    [(_ pat) (app (lambda (form)
+                    (let loop ([form form])
+                      (match form
+                        [(? void?) (void)]
+                        [pat form]
+                        [_ (loop (step-cached form))])))
                   pat)]))
 (module+ test
-  (check-match 'x (& 'x))
-  (check-match '1 (& '(quote 1)))
-  (check-match '(and (and a b) c) (& '(and (and a b) c)))
-  (check-match '(and (and a b) c) (& '(if (and a b) c #f)))
+
+
+  (current-step-table (make-weak-hasheq))
+
+  (check-match (expand! 'x) (& 'x))
+  (check-match (expand! '1) (& '(quote 1)))
+  (check-match (expand! '(and (and a b) c)) (& '(and (and a b) c)))
+  (check-match (expand! '(and (and a b) c)) (& '(if (and a b) c #f)))
   ; This one doesn't match, because (and (if )) never happened
-  (check-match '(and (and a b) c) (not (& '(and (if a b #f) c))))
+  (check-match (expand! '(and (and a b) c)) (not (& '(and (if a b #f) c))))
   ; But it does work if you nest the "ever steps to" pattern
-  (check-match '(and (and a b) c) (& `(and ,(& '(if a b #f)) c)))
+  (displayln "")
+  (current-step-table (expand! (make-weak-hasheq)))
+  (check-match (expand! '(and (and a b) c)) (& `(and ,(& '(if a b #f)) c)))
+  (displayln "")
+
+  ; 1 never steps to #f
+  (check-match (expand! 1) (not (& #f)))
+  ; everything eventually steps to void
+  (check-match (expand! 1) (& (? void?)))
+
+  ; Subforms that expanded have steps-cached.
+  ; But subforms that didn't expand (auxilliary forms like params in a lambda)
+  ; don't have steps-cached.
+  (match-let* ([form (expand! '(lambda () 1))]
+               [`(lambda ,params ,body) form])
+    (check-equal? (sequence->list (steps-cached form))
+                  '[(lambda () 1) (lambda () (quote 1))])
+    (check-equal? (sequence->list (steps-cached params))
+                  '[()])
+    (check-equal? (sequence->list (steps-cached body))
+                  '[1 (quote 1)]))
 
   ;;
   )
