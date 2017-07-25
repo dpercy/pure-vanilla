@@ -300,6 +300,20 @@ For super-simplicity, implement "mark" by just appending to the symbol!
 
   ; tricky: see bugs in implementation of 'compile-core
   ;;(check-equal? (compile-core '(lambda () 1)) (Lambda '() (Quote 1)))
+  ; again note the bug
+  (check-equal? (compile-core '(lambda (x) x))
+                (Lambda 'x (Var 'x)))
+
+  ; Inlining does not happen for this compiler: it never needs to
+  (check-equal? (compile-core '(let ([positive? (lambda (n) (< 0 n))])
+                                 (lambda (doc)
+                                   (positive? (hash-ref doc 'x)))))
+                (Let (list (Arm 'positive?
+                                (Lambda 'n (Call (Var '<) (list (Quote 0) (Var 'n))))))
+                     (Lambda 'doc
+                             (Call (Var 'positive?)
+                                   (list (Call (Var 'hash-ref)
+                                               (list (Var 'doc) (Quote 'x))))))))
 
 
 
@@ -359,6 +373,17 @@ For super-simplicity, implement "mark" by just appending to the symbol!
   (check-equal? (query '(lambda (doc) #true))
                 ; {}
                 (hash))
+
+  ; TODO make this work
+  ; This is a much more interesting example:
+  ; part of the query logic is abstracted into a helper function.
+  ; Can the query compiler remove this abstraction?
+  '''(check-equal? (query '(let ([positive? (lambda (n) (< 0 n))])
+                             (lambda (doc)
+                               (positive? (hash-ref doc 'x)))))
+                   (hash 'x (hash '$gt 0)))
+  ; TODO once this works, what assumptions have I made?
+  ; Did I assume inlining always terminates?
 
 
   ;;
