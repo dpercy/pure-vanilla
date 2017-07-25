@@ -42,6 +42,7 @@ For super-simplicity, implement "mark" by just appending to the symbol!
                void?)))
 
 (define current-step-table (make-parameter #f))
+(define step-log (make-parameter #f))
 
 ; Step either expands the form forward by 1 step,
 ; or returns void to indicate the form is already fully expanded.
@@ -50,7 +51,8 @@ For super-simplicity, implement "mark" by just appending to the symbol!
     [#false (step-impl form)]
     [tbl (hash-ref! tbl form (lambda ()
                                (define v (step-impl form))
-                               (displayln (format "~s -> ~s" form v))
+                               (when (step-log)
+                                 (displayln (format "~s -> ~s" form v)))
                                v))]))
 (define (step-impl form)
   (match form
@@ -149,16 +151,17 @@ For super-simplicity, implement "mark" by just appending to the symbol!
                       ]))))
 
 (define (expand! v)
-  (displayln "")
-  (displayln "")
-  (displayln (format "expand! ~v" v))
+  (when (step-log)
+    (displayln "")
+    (displayln "")
+    (displayln (format "expand! ~v" v)))
   (unless (current-step-table)
     (error 'expand! "no current-step-table"))
   (expand v)
   v)
 
 
-(define-match-expander &
+(define-match-expander ever-stepped-to
   (syntax-rules ()
     [(_ pat) (app (lambda (form)
                     (let loop ([form form])
@@ -172,22 +175,20 @@ For super-simplicity, implement "mark" by just appending to the symbol!
 
   (current-step-table (make-weak-hasheq))
 
-  (check-match (expand! 'x) (& 'x))
-  (check-match (expand! '1) (& '(quote 1)))
-  (check-match (expand! '(and (and a b) c)) (& '(and (and a b) c)))
-  (check-match (expand! '(and (and a b) c)) (& '(if (and a b) c #f)))
+  (check-match (expand! 'x) (ever-stepped-to 'x))
+  (check-match (expand! '1) (ever-stepped-to '(quote 1)))
+  (check-match (expand! '(and (and a b) c)) (ever-stepped-to '(and (and a b) c)))
+  (check-match (expand! '(and (and a b) c)) (ever-stepped-to '(if (and a b) c #f)))
   ; This one doesn't match, because (and (if )) never happened
-  (check-match (expand! '(and (and a b) c)) (not (& '(and (if a b #f) c))))
+  (check-match (expand! '(and (and a b) c)) (not (ever-stepped-to '(and (if a b #f) c))))
   ; But it does work if you nest the "ever steps to" pattern
-  (displayln "")
   (current-step-table (expand! (make-weak-hasheq)))
-  (check-match (expand! '(and (and a b) c)) (& `(and ,(& '(if a b #f)) c)))
-  (displayln "")
+  (check-match (expand! '(and (and a b) c)) (ever-stepped-to `(and ,(ever-stepped-to '(if a b #f)) c)))
 
   ; 1 never steps to #f
-  (check-match (expand! 1) (not (& #f)))
+  (check-match (expand! 1) (not (ever-stepped-to #f)))
   ; everything eventually steps to void
-  (check-match (expand! 1) (& (? void?)))
+  (check-match (expand! 1) (ever-stepped-to (? void?)))
 
   ; Subforms that expanded have steps-cached.
   ; But subforms that didn't expand (auxilliary forms like params in a lambda)
@@ -200,6 +201,56 @@ For super-simplicity, implement "mark" by just appending to the symbol!
                   '[()])
     (check-equal? (sequence->list (steps-cached body))
                   '[1 (quote 1)]))
+
+  ; It's fine to wrap every single subform in &
+  (check-match (expand! '(and (and x y) z))
+               (ever-stepped-to (list (ever-stepped-to 'if)
+                                      (ever-stepped-to (list (ever-stepped-to 'if)
+                                                             (ever-stepped-to 'x)
+                                                             (ever-stepped-to 'y)
+                                                             (ever-stepped-to #f)))
+                                      (ever-stepped-to 'z)
+                                      (ever-stepped-to #f))))
+
+  ;;
+  )
+
+(define-match-expander &
+  (lambda (stx)
+    (syntax-case stx (unquote)
+      [(_ (unquote subpat)) #'subpat]
+      [(_ (subpats ...))
+       ; wrap each subpat only if it isn't a "..."
+       (with-syntax ([(subpats ...) (for/list ([subpat (syntax->list #'(subpats ...))])
+                                      (if (equal? '... (syntax-e subpat))
+                                          subpat
+                                          #`(& #,subpat)))])
+
+         #'(ever-stepped-to (list subpats ...)))]
+      [(_ subpat) #'(ever-stepped-to 'subpat)])))
+(module+ test
+
+  (check-match (expand! '(and (and 1 2) 3)) (& (and (and 1 2) 3)))
+  (check-match (expand! '(and (and 1 2) 3)) (& (and (if 1 2 #f) 3)))
+  (check-match (expand! '(and (and 1 2) 3)) (& (if (and 1 2) 3 #f)))
+
+  (check-match (expand! '(and (and 1 2) 3)) (& (and (and '1  2)  3)))
+  (check-match (expand! '(and (and 1 2) 3)) (& (and (and  1 '2)  3)))
+  (check-match (expand! '(and (and 1 2) 3)) (& (and (and  1  2) '3)))
+  (check-match (expand! '(and (and 1 2) 3)) (& (and (and '1 '2)  3)))
+  (check-match (expand! '(and (and 1 2) 3)) (& (and (and '1  2) '3)))
+  (check-match (expand! '(and (and 1 2) 3)) (& (and (and  1 '2) '3)))
+  (check-match (expand! '(and (and 1 2) 3)) (& (and (and '1 '2) '3)))
+
+  (check-match (expand! '(and (and 1 2) 3)) (& (and ,x '3)) (equal? x '(and 1 2)))
+  (check-match (expand! '(and (and 1 2) 3)) (& (if ,x ,y #f)) (and (equal? x '(and 1 2))
+                                                                   (equal? y 3)))
+
+  ; dotted subpattern
+  (check-match (expand! '(and 1 2)) (& (and ,args ...)) (equal? args '(1 2)))
+  (check-match (expand! '(and 1 2)) (& (if ,args ...)) (equal? args '(1 2 #f)))
+  (check-match (expand! '(and (and 1 2) 3)) (& (and (and ,args ...) 3)) (equal? args '(1 2)))
+  (check-match (expand! '(and (and 1 2) 3)) (& (and (if ,args ...) 3)) (equal? args '(1 2 #f)))
 
   ;;
   )
