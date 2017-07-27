@@ -374,10 +374,79 @@ For super-simplicity, implement "mark" by just appending to the symbol!
                 ; {}
                 (hash))
 
+
+
+  ; TODO try a simpler and more ergonomic interface (new file):
+  #|
+
+  This is a lambda-pattern:
+  (lambda (,param) ,body)
+
+  This is an and-pattern:
+  (and ,x ,y)
+  This too:
+  (and 1 2)
+  (and ,args ...)
+
+  This is a foo-pattern:
+  (foo ,args ...)
+  It's ok that foo doesn't mean anything.
+
+  This is a call-pattern:
+  (,x ,y)
+  (,stuff ...)
+  (call ,stuff ...)
+  (4 ,x)
+
+  This is a quote pattern:
+  4
+  (quote 4)
+  (quote ,(? string?))
+
+  This is a catchall pattern:
+  ,x
+  This too, even though it may fail to match once it gets a value:
+  ,(? string?)
+
+  So each pattern has a head (except catchall patterns).
+  You can no longer do things like
+  (and (if a b c) z)
+  because pattern matching is invoked by the expander.
+  But maybe pattern matching can *call back* into the expander;
+  and this is how they communicate.
+  The domain-specific compiler can write
+  `(and ,(eventually `(if ,a ,b ,c)) ,z)
+  and "eventually" tells the expander to keep on truckin' until the subpattern matches.
+
+  Maybe the expander can detect when the DSC supports certain features or not.
+  So if the DSC doesn't support general (call _) forms,
+  if it gets stuck trying to call a parameter, it can try to specialize the current function.
+  This is a very opposite approach to what I have here.
+
+  So how would this DSC-controlled-inlining handle a chunky case like (and _ _)?
+  That one could be as simple as (if _ _ #f)...
+  Maybe matching unexpanded macros is not so important!
+  Maybe the key is to keep the core both
+  - smaller than a business card to define
+  - not boilerplatey like lambda calculus or SKI
+
+  But remember: inlining is sometimes *necessary*:
+  higher order functions not supported by the target (foldr * becomes x*x*x)
+
+  |#
+
+
   ; TODO make this work
   ; This is a much more interesting example:
   ; part of the query logic is abstracted into a helper function.
   ; Can the query compiler remove this abstraction?
+  ; IDEA:
+  ;   - add a nondeterministic part to ever-steps-to:
+  ;     - variable *can* be done, *or* can step to an inlined version
+  ;     - problem: (& _) will never terminate when matching omega.
+  ;       - need to cycle detect and limit depth. "fast and effective procedure inlining"
+  ;       - good(?) news is you only need to follow *tail* recursion
+
   '''(check-equal? (query '(let ([positive? (lambda (n) (< 0 n))])
                              (lambda (doc)
                                (positive? (hash-ref doc 'x)))))
