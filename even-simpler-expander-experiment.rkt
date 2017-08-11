@@ -36,55 +36,50 @@
 (define/contract (make-compiler prim-handler) (-> (-> any/c (or/c #f Just?))
                                                   (-> any/c any/c))
   (define (compile expr)
-    (displayln (format "compile ~v" expr))
     (match (prim-handler expr)
       ; easy case: prim handler knows how to reduce this expression
       [(Just result) result]
       [#false
        ; otherwise, we need to reduce the current expression somehow
-       (match expr
-         ; Can we inline?
-         [(Call (Lambda params body) args) #:when (and (= (length params)
-                                                          (length args))
-                                                       (andmap inlineable-arg? args))
-          ; Since all the args are sipmle (side effect free),
-          ; we can try just plugging them in.
-          (define h (for/hash ([p params]
-                               [a args])
-                      (values p a)))
-          (displayln (format "  subst ~v in ~v" h body))
-          (compile (subst body h))]
-
-         ; Can we commute let bindings?
-         ; (let ([x (let ([y 5]) y)]) x)
-         ; ==>
-         ; (let ([y 5]) (let ([x y]) x))
-         ; TODO eliminate this case by having Call simplify its args first?
-         ; TODO this doesn't work with multiple args, or heterogenous args
-         [(Call (Lambda (list x) final-body)
-                (list (Call (Lambda (list y) arg-body)
-                            (list init-v))))
-          (displayln (format "  commute ~v = ~v above ~v = ~v" y init-v x arg-body))
-          (compile (Call (Lambda (list y)
-                                 (Call (Lambda (list x)
-                                               final-body)
-                                       (list arg-body)))
-                         (list init-v)))]
-
-         ; Can we simplify some child expressions?
-         [(Call func args)
-
-
-          ]
-
-
-         [_ (error 'compile "no rule to compile this expression: ~v" expr)])]))
+       (match (try-simplify-root-once expr)
+         [(Just expr*) (compile expr*)]
+         [#false (error 'compile "no rule to compile this expression: ~v" expr)])]))
   compile)
 
-(define (try-simplify-root-once expr)
+(define (try-simplify-root-once expr) ; Just expr
   (match expr
+    [(Call (app simplify-root-completely (Lambda params body))
+           (list (app simplify-root-completely args) ...))
+     #:when (and (= (length params)
+                    (length args))
+                 (andmap inlineable-arg? args))
+     ; Since all the args are sipmle (side effect free),
+     ; we can try just plugging them in.
+     (define h (for/hash ([p params]
+                          [a args])
+                 (values p a)))
+     (Just (subst body h))]
 
-    ))
+    ; Can we commute let bindings?
+    ; (let ([x (let ([y 5]) y)]) x)
+    ; ==>
+    ; (let ([y 5]) (let ([x y]) x))
+    ; TODO eliminate this case by having Call simplify its args first?
+    ; TODO this doesn't work with multiple args, or heterogenous args
+    [(Call (Lambda (list x) final-body)
+           (list (Call (Lambda (list y) arg-body)
+                       (list init-v))))
+     (Just (Call (Lambda (list y)
+                         (Call (Lambda (list x)
+                                       final-body)
+                               (list arg-body)))
+                 (list init-v)))]
+    [_ #false]))
+
+(define (simplify-root-completely expr) ; expr
+  (match (try-simplify-root-once expr)
+    [#false expr]
+    [(Just expr) (simplify-root-completely expr)]))
 
 (define (subst e h)
   ; TODO hygiene
@@ -92,7 +87,12 @@
   (match e
     [(Quote _) e]
     [(Var x) (hash-ref h x (lambda () e))]
-    [(Lambda params body) (Lambda params (r body))]
+    [(Lambda params body)
+     (define params* (map gensym params))
+     (define h* (for/fold ([h h]) ([p params]
+                                   [p* params*])
+                  (hash-set h p (Var p*))))
+     (Lambda params* (subst body h*))]
     [(If t c a) (If (r t) (r c) (r a))]
     [(Call f args) (Call (r f) (map r args))]))
 
@@ -123,7 +123,6 @@
       [`(,f ,args ...) (Call (parse f) (map parse args))]
       [_ (error 'parse "bad syntax: ~v" form)]))
   (define (p form)
-    (displayln (format "\n\nparse ~v" form))
     (parse form))
 
 
@@ -169,20 +168,12 @@
                 (Plus (Num 1) (Num 2)))
 
   ; inlining a higher-order function
-  (check-equal? (arith (p '((lambda (twice)
-                              (twice (lambda (n) (+ n 1))
-                                     7))
-                            (lambda (f arg)
-                              (f (f arg))))))
-                (Plus (Plus (Num 7) (Num 1)) (Num 1)))
-
-  ((lambda (f arg)
-     (f (f arg))) (lambda (n) (+ n 1))
-   7)
-  ((lambda (f arg)
-     (f (f arg)))
-   (lambda (n) (+ n 1))
-   7)
+  ''(check-equal? (arith (p '((lambda (twice)
+                                (twice (lambda (n) (+ n 1))
+                                       7))
+                              (lambda (f arg)
+                                (f (f arg))))))
+                  (Plus (Plus (Num 7) (Num 1)) (Num 1)))
 
 
   ; To test copy propagation (eliminating renames), extend the language with "holes":
@@ -206,6 +197,29 @@
                                         x))))
              "no rule")
 
+  (struct Bind1 (name val body) #:transparent)
+
+  (define-compiler arith-let
+    [(Call (Var '+) (list x y)) (Plus (arith-let x) (arith-let y))]
+    [(Quote (? number? n)) (Num n)]
+    [(Call (Lambda (list param) body) (list arg))
+     ; This doesn't work because you don't know whether the let is
+     ; a number or function. If it's function you want to inline it,
+     ; rather than compile a bind1.
+     (Bind1 param
+            (arith-let arg)
+            (arith-let body))]
+    [(Var x) x])
+
+  (check-match (arith-let (p '((lambda (twice)
+                                 (twice (lambda (n) (+ n 1))
+                                        7))
+                               (lambda (f arg)
+                                 (f (f arg))))))
+               (Bind1 x (Num 7)
+                      (Bind1 y (Plus x (Num 1))
+                             (Bind1 z (Plus y (Num 1))
+                                    z))))
 
 
   ; Previously, the expander was forced to inline things to allow
