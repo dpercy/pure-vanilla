@@ -1,14 +1,6 @@
 #lang racket
 
 
-#|
-
-
-- goal: implement partial compiler using rewrite rules
-- goal: automatically remove abstractions to help the rewrite rules
-
-
-|#
 (module+ test (require rackunit))
 
 (module helpers racket
@@ -33,54 +25,6 @@
 
 (define inlineable-arg? (or/c Var? Quote? Lambda?))
 
-(define/contract (make-compiler prim-handler) (-> (-> any/c (or/c #f Just?))
-                                                  (-> any/c any/c))
-  (define (compile expr)
-    (match (prim-handler expr)
-      ; easy case: prim handler knows how to reduce this expression
-      [(Just result) result]
-      [#false
-       ; otherwise, we need to reduce the current expression somehow
-       (match (try-simplify-root-once expr)
-         [(Just expr*) (compile expr*)]
-         [#false (error 'compile "no rule to compile this expression: ~v" expr)])]))
-  compile)
-
-(define (try-simplify-root-once expr) ; Just expr
-  (match expr
-    [(Call (app simplify-root-completely (Lambda params body))
-           (list (app simplify-root-completely args) ...))
-     #:when (and (= (length params)
-                    (length args))
-                 (andmap inlineable-arg? args))
-     ; Since all the args are sipmle (side effect free),
-     ; we can try just plugging them in.
-     (define h (for/hash ([p params]
-                          [a args])
-                 (values p a)))
-     (Just (subst body h))]
-
-    ; Can we commute let bindings?
-    ; (let ([x (let ([y 5]) y)]) x)
-    ; ==>
-    ; (let ([y 5]) (let ([x y]) x))
-    ; TODO eliminate this case by having Call simplify its args first?
-    ; TODO this doesn't work with multiple args, or heterogenous args
-    [(Call (Lambda (list x) final-body)
-           (list (Call (Lambda (list y) arg-body)
-                       (list init-v))))
-     (Just (Call (Lambda (list y)
-                         (Call (Lambda (list x)
-                                       final-body)
-                               (list arg-body)))
-                 (list init-v)))]
-    [_ #false]))
-
-(define (simplify-root-completely expr) ; expr
-  (match (try-simplify-root-once expr)
-    [#false expr]
-    [(Just expr) (simplify-root-completely expr)]))
-
 (define (subst e h)
   ; TODO hygiene
   (define (r e) (subst e h))
@@ -96,20 +40,113 @@
     [(If t c a) (If (r t) (r c) (r a))]
     [(Call f args) (Call (r f) (map r args))]))
 
-(define-syntax-rule (define-compiler name
-                      [pat form ... exp] ...)
+; feature flags
+(define known-call-supported? (make-parameter #false))
+
+(define simpl-env (make-parameter (hash)))
+(struct SimplBinding (residualized original simplified) #:transparent)
+(define (lookup name)
+  (hash-ref (simpl-env) name #false))
+(define (prim? expr)
+  (match expr
+    [(Var (and (app lookup #false)
+               (or '+)))
+     #true]
+    [_ #false]))
+(define (trace name input output)
+  (displayln (format "~s ~v ~s ~v" name input "->" output))
+  output)
+(define (simplify expr)
+  (displayln (format "simpl ~v" expr))
+  (trace
+   "simplify"
+   expr
+   (match expr
+     ; specialized cases
+     ; - let1
+     [(Call (Lambda (list param) body) (list arg))
+      ; - is the bound name ever used?  else drop it!
+      ; - is the bound name ever called?
+      ; - is the bound name ever used as a non-function?
+      ;     wait what if it's used as both?
+      (let* ([orig-env (simpl-env)]
+             [residualized? (box #false)]
+             [arg* (delay (parameterize ([simpl-env orig-env])
+                            (simplify arg)))]
+             [binding (SimplBinding residualized?
+                                    expr
+                                    arg*)])
+        (parameterize ([simpl-env (hash-set (simpl-env)
+                                            param
+                                            binding)])
+          (let ([body* (simplify body)])
+            (if (unbox residualized?)
+                ; if the param was ever used, create a let binding
+                (Call (Lambda (list param) body*) (list (force arg*)))
+                ; if the param ended up being unused (maybe inlined),
+                ; don't create any binding.
+                ; But do still check for effects.
+                (if (side-effect-free? (force arg*))
+                    body*
+                    (Call (Lambda (list param) body*) (list (force arg*))))))))]
+     ; - var lookup
+     [(Var (and x (app lookup (SimplBinding residualized? original simplified))))
+      (let ([e (force simplified)])
+        (if (side-effect-free? e)
+            e
+            (begin
+              (set-box! residualized? #true)
+              (Var x))))]
+
+     ; lowering cases
+     ; - known call
+     [(Call (and (Var f) (app lookup (? SimplBinding? b))) args) #:when (not (known-call-supported?))
+      ; We have to inline
+      (match (force (SimplBinding-simplified b))
+        ; success: callee simplified to a lambda expression
+        [(and func (or (? prim?) (Lambda _ _))) (simplify (Call func args))]
+        ; failure: callee simplified to something else
+        [v
+         (error 'simplify "Can't simplify this callee ~v bound to ~v any further in ~v"
+                f
+                v
+                expr
+                )])]
+
+     ; general cases
+     [(Var x)  (Var x)]
+     [(Quote v)  (Quote v)]
+     ; - NOTE: stop here to make ((lambda ) ) case easier
+     ;         This must be why Dybvig uses a "call context" instead
+     [(Lambda params body)  (Lambda params body)]
+     [(Call func args)  (Call (simplify func) (map simplify args))]
+     [(If t c a)  (If (simplify t) (simplify c) (simplify a))])))
+(define (side-effect-free? expr)
+  ;;  (displayln (list 'sef? expr))
+
+  (match expr
+    [(Quote _) #true]
+    [(Var _) #true]
+    [(Lambda _ _) #true]
+    [(If t c a) (and (side-effect-free? t) (side-effect-free? c) (side-effect-free? a))]
+    [(Call (Var (and '+ (app lookup #false)))
+           args)
+     (andmap side-effect-free? args)]
+    [_
+     (displayln (list 'nope expr))
+     #false]))
+
+
+(define-syntax-rule (define-compiler name arms ...)
+  ; 1. inside the compiler, name is bound to just the final codegen step
+  ; 2. outside the compiler, name is bound to simplify+codegen
   (define name
-    (make-compiler
-     (match-lambda
-       ; TODO convenient wrapper for patterns?
-       [pat
-        ; middle forms could be expressions, or #:when clauses
-        form ...
-        ; wrap each expression in a Just
-        (Just exp)]
-       ...
-       ; if no case matched, return #false to indicate there is no rule for this expr
-       [_ #false]))))
+    (let ([the-compiler (letrec ([name (match-lambda arms ...
+                                                     [e (error 'name "no rule for ~v" e)])])
+                          name)])
+
+      (lambda (expr)
+        (the-compiler (simplify expr))))))
 (module+ test
 
   (define (parse form)
@@ -129,6 +166,8 @@
   (struct Plus (left right) #:transparent)
   (struct Num (value) #:transparent)
 
+  ; - primcalls
+  ; - literals
   (define-compiler arith
     [(Call (Var '+) (list x y)) (Plus (arith x) (arith y))]
     [(Quote (? number? n)) (Num n)])
@@ -154,58 +193,71 @@
   (check-equal? (arith (p '((lambda (x) x) ((lambda (y) y) 5)))) (Num 5))
   (check-equal? (arith (p '((lambda (x) ((lambda (y) y) x)) 5))) (Num 5))
   ; tricky - cases that rely on constant propagation of a non-quote-form
-  ''(check-equal? (arith (p '((lambda (x) ((lambda (y) y) x)) (+ 2 3)))) (Plus (Num 2) (Num 3)))
-  ''(check-equal? (arith (p '((lambda (x) ((lambda (y) y) (+ x 3))) 2))) (Plus (Num 2) (Num 3)))
+  (check-equal? (arith (p '((lambda (x) ((lambda (y) y) x)) (+ 2 3)))) (Plus (Num 2) (Num 3)))
+  (check-equal? (arith (p '((lambda (x) ((lambda (y) y) (+ x 3))) 2))) (Plus (Num 2) (Num 3)))
 
   ; cases that rely on inlining
+  (displayln 'hi)
+  (error 'TODO "reword tests in terms of simplify+flags")
   (check-equal? (arith (p '((lambda (inc) (inc 7))
                             (lambda (x) (+ x 1)))))
                 (Plus (Num 7) (Num 1)))
+  (displayln 'bye)
+
 
   ; cases that rely on propagating a global
-  (check-equal? (arith (p '((lambda (plus) (plus 1 2))
+  (check-equal? (arith (p '((lambda (add) (add 1 2))
                             +)))
                 (Plus (Num 1) (Num 2)))
 
   ; inlining a higher-order function
-  ''(check-equal? (arith (p '((lambda (twice)
-                                (twice (lambda (n) (+ n 1))
-                                       7))
-                              (lambda (f arg)
-                                (f (f arg))))))
-                  (Plus (Plus (Num 7) (Num 1)) (Num 1)))
+  (displayln "")
+  (displayln "")
+  (displayln "")
+  (check-equal? (arith (p '((lambda (twice)
+                              (twice (lambda (n) (+ n 1))
+                                     7))
+                            (lambda (f arg)
+                              (f (f arg))))))
+                (Plus (Plus (Num 7) (Num 1)) (Num 1)))
 
 
   ; To test copy propagation (eliminating renames), extend the language with "holes":
 
   (struct Hole () #:transparent)
 
-  (define-compiler (arith-on var-name)
-    [(Call (Var '+) (list x y)) (Plus ((arith-on var-name) x)
-                                      ((arith-on var-name) y))]
+  ; - primcalls
+  ; - literals
+  ; - a single free/global variable
+  (define-compiler arith-x
+    [(Call (Var '+) (list x y)) (Plus (arith-x x)
+                                      (arith-x y))]
     [(Quote (? number? n)) (Num n)]
-    [(Var (== var-name)) (Hole)])
+    [(Var 'x) (Hole)])
 
-  (check-equal? ((arith-on 'x) (p 'x)) (Hole))
-  (check-exn exn:fail? (lambda () ((arith-on 'x) (p 'y))) "no rule")
-  (check-equal? ((arith-on 'x) (p '(+ x 1))) (Plus (Hole) (Num 1)))
-  (check-equal? ((arith-on 'x) (p '((lambda (y) (+ y 2)) x))) (Plus (Hole) (Num 2)))
-  (check-equal? ((arith-on 'x) (p '((lambda (y) (+ y y)) x))) (Plus (Hole) (Hole)))
-  (check-equal? ((arith-on 'x) (p '((lambda (y) (+ x y)) x))) (Plus (Hole) (Hole)))
-  (check-exn exn:fail? (lambda () ((arith-on 'x)
+  (check-equal? (arith-x (p 'x)) (Hole))
+  (check-exn exn:fail? (lambda () (arith-x (p 'y))) "no rule")
+  (check-equal? (arith-x (p '(+ x 1))) (Plus (Hole) (Num 1)))
+  (check-equal? (arith-x (p '((lambda (y) (+ y 2)) x))) (Plus (Hole) (Num 2)))
+  (check-equal? (arith-x (p '((lambda (y) (+ y y)) x))) (Plus (Hole) (Hole)))
+  (check-equal? (arith-x (p '((lambda (y) (+ x y)) x))) (Plus (Hole) (Hole)))
+  (check-exn exn:fail? (lambda () (arith-x
                                    (p '((lambda (y) (+ x z))
                                         x))))
              "no rule")
 
   (struct Bind1 (name val body) #:transparent)
 
+  ; - primcalls
+  ; - literals
+  ; - let expressions
+  ; - let-bound variables
   (define-compiler arith-let
     [(Call (Var '+) (list x y)) (Plus (arith-let x) (arith-let y))]
     [(Quote (? number? n)) (Num n)]
     [(Call (Lambda (list param) body) (list arg))
-     ; This doesn't work because you don't know whether the let is
-     ; a number or function. If it's function you want to inline it,
-     ; rather than compile a bind1.
+     ; WRONG --- you don't know whether the let is a number or function.
+     ; If it's function you want to inline it, rather than compile a bind1.
      (Bind1 param
             (arith-let arg)
             (arith-let body))]

@@ -1,0 +1,288 @@
+#lang racket
+
+
+(module+ test (require rackunit))
+
+(module helpers racket
+  (provide (all-defined-out))
+  (define self-quoting?
+    (not/c (or/c symbol?
+                 empty?
+                 cons?
+                 void?))))
+(require 'helpers)
+(begin-for-syntax (require 'helpers))
+
+(struct Just (value) #:transparent)
+
+
+
+(struct Expr () #:transparent
+  #:methods gen:custom-write
+  [(define (write-proc expr port mode)
+     (write-string (format "(parse '~a)" (render expr))
+                   port))])
+(struct Var Expr (name) #:transparent)
+(struct Quote Expr (value) #:transparent)
+(struct Lambda Expr (params body) #:transparent)
+(struct Call Expr (func args) #:transparent)
+(struct If Expr (test consq alt) #:transparent)
+
+(define (parse form)
+  (match form
+    [(? symbol?) (Var form)]
+    [(? self-quoting? v) (Quote v)]
+    [`(quote ,v) (Quote v)]
+    [`(lambda (,params ...) ,body) (Lambda params (parse body))]
+    [`(if ,t ,c ,a) (If (parse t) (parse c) (parse a))]
+    [`(let ([,x ,v] ...) ,body) (parse `((lambda ,x ,body) ,@v))]
+    [(cons (or 'quote 'lambda 'if 'let) _) (error 'parse "bad syntax: ~v" form)]
+    [`(,f ,args ...) (Call (parse f) (map parse args))]
+    [_ (error 'parse "bad syntax: ~v" form)]))
+
+(define (render form)
+  (match form
+    [(Quote v) `(quote ,v)]
+    [(Var name) name]
+    [(Lambda params body) `(lambda ,params ,(render body))]
+    [(Call (Lambda params body) args) #:when (= (length params) (length args))
+     `(let ,(map list params (map render args)) ,(render body))]
+    [(Call func args) `(,(render func) ,@(map render args))]
+    [(If t c a) `(if ,(render t) ,(render c) ,(render a))]))
+
+(define (subst e h)
+  ; TODO hygiene
+  (define (r e) (subst e h))
+  (match e
+    [(Quote _) e]
+    [(Var x) (hash-ref h x (lambda () e))]
+    [(Lambda params body)
+     (define params* (map gensym params))
+     (define h* (for/fold ([h h]) ([p params]
+                                   [p* params*])
+                  (hash-set h p (Var p*))))
+     (Lambda params* (subst body h*))]
+    [(If t c a) (If (r t) (r c) (r a))]
+    [(Call f args) (Call (r f) (map r args))]))
+
+
+#|
+
+The goal of *simplify* is to remove certain language features.
+- remove local function defs
+- remove escaping functions/prims, and indirect calls
+- remove all function defs, and non-prim calls
+- remove let-binding
+
+Mental model:
+- let-binding is spelled ((lambda ) )
+- variables can be:
+.   - unbound ("global")
+.   - let-bound
+.   - parameters
+
+
+Strategies:
+- lift defs as high as they go (but no higher)
+.  - can result in defs becoming global
+.  - doesn't add indirection
+.  - ensures all fun-defs are named
+
+- inline fun-calls to prevent their arguments from escaping
+- inline fun-calls when the call isn't allowed
+- inline let-bound values when let-binding isn't allowed
+- drop unused let bindings when let-binding isn't allowed
+
+- add parameters to def+use when local functions aren't allowed
+.   - only works when the function doesn't escape
+.   - can destroy known calls
+- inline fun-defs when the local definition isn't allowed
+.   - only works when the function doesn't escape
+.   - could fail if inlining blows up
+
+- lift bindings surrounding a callee to connect call and callee
+- generally, just always lift a let around a call.
+
+
+Which transformations enable each other?
+- let-over-call causes more calls to become known
+- known calls enable inlining
+- known calls enable lifting
+- lifting can reveal known calls
+- inlining can reveal dead bindings
+
+- global-lifting can *break* known bindings
+
+
+|#
+
+(struct BindLet (value env used simplified) #:transparent)
+(struct BindParam () #:transparent)
+
+(struct ContextValue () #:transparent)
+(struct ContextCall (outer-context arg-binds) #:transparent)
+
+(define (simplify expr
+                  #:allow-let-binding [allow-let-binding #true]
+                  #:allow-functions [allow-functions allow-let-binding]
+                  #:allow-first-class-functions [allow-first-class-functions allow-functions])
+  (when (and allow-first-class-functions (not allow-functions))
+    (error 'simplify "allow-first-class-functions #true contradicts allow-functions #false"))
+  (when (and allow-functions (not allow-let-binding))
+    ; If you can't name your function,
+    ; and you can't invoke it immediately like ((lambda ) ),
+    ; then there's really no point in allowing functions at all.
+    (error 'simplify "allow-functions #true contradicts allow-let-binding #false"))
+  (displayln "")
+  (displayln "")
+  (displayln "")
+  (let simplify ([expr expr]
+                 [env (hash)]
+                 [context (ContextValue)])
+    (displayln (list 'simpl expr))
+    (define (lookup name) (hash-ref env name #false))
+    (match expr
+
+      [(Quote _) expr]
+
+      [(Var name) (match context
+
+                    ; just residualize the var
+                    [(ContextValue) expr]
+
+                    ; maybe can inline
+                    [(ContextCall outer-context arg-binds)
+                     (match (lookup name)
+
+                       ; known function - can inline if necessary
+                       [(BindLet _ env* used (app force (? Lambda? lam)))
+
+                        ; need to inline if:
+                        ; - functions aren't allowed
+                        ; - an arg is a function, and first-class functions aren't allowed
+                        ; - callee returns a function, and first-class functions aren't allowed
+                        ; - otherwise don't inline
+
+                        ; For now let's inline only if functions aren't allowed.
+                        (cond
+                          ; Instead of returning the var,
+                          ; get the lambda it's bound to, and keep simplifying that.
+                          [(not allow-functions)
+                           (displayln (list 'inline name))
+                           (define v (simplify lam env* context))
+                           (displayln (list 'inlined name 'to v))
+                           v]
+
+                          ; decided not to inline - residualize
+                          [else expr])]
+
+                       ; can't inline - residualize
+                       [_ expr])])]
+
+      [(Lambda params body)
+
+       (match context
+         [(ContextValue)
+
+          (Lambda params
+                  (simplify body
+                            (for/fold ([e env]) ([p params])
+                              (hash-set e p (BindParam)))
+                            (ContextValue)))]
+
+         [(ContextCall outer-context arg-binds)
+
+          ; This lambda is actually acting like a let.
+          ; Extend the environment with its known arguments and recur on the body.
+          ; But you have to preserve the params.
+          (Lambda params
+                  (simplify body
+                            (for/fold ([e env]) ([p params] [a arg-binds])
+                              (hash-set e p a))
+                            ; The context for the body is the same as the context for the call.
+                            ; This is how let-bindings are floated out over calls!
+                            ; In (call (call (lambda (x) (lambda (y) E)) 1) 2),
+                            ; the inner lambda will be process in (ContextCall ... (BindLet ... (Quote 2)).
+                            context))])]
+
+      [(Call func args)
+
+       ; process the function in a call context
+       (define arg-binds (for/list ([a args])
+                           (BindLet a env (box #false)
+                                    (delay
+                                      (displayln (list 'operand a 'start))
+                                      (let ([v (simplify a
+                                                         env
+                                                         (ContextValue))])
+                                        (displayln (list 'operand a 'got v))
+                                        v)))))
+       (define callee-context (ContextCall context arg-binds))
+       (define func* (simplify func env callee-context))
+       ; TODO check whether arguments were used.
+       (Call func* (for/list ([ab arg-binds])
+                     (match ab
+                       [(BindLet _ _ _ simplified) (force simplified)])))]
+
+      [(If test consq alt)
+       ; TODO introduce ContextTest?
+       (If (simplify test env (ContextValue))
+           (simplify consq env context)
+           (simplify alt env context))]
+
+      [_ (list 'no-case-for expr)])))
+
+(module+ test
+  (require rackunit)
+
+
+  (define (p form)
+    (parse form))
+  (check-equal? (p '(let ([x 1] [y 2]) 3))
+                (Call (Lambda '(x y) (Quote 3))
+                      (list (Quote 1) (Quote 2))))
+
+  ; remove higher order functions (GLSL, C without function pointers)
+  '''(check-equal? (simplify #:allow-first-class-functions #f
+                             (p '(let ([twice (lambda (f) (lambda (x) (f (f x))))]
+                                       [add (lambda (x)
+                                              ; this local function must be removed
+                                              (lambda (y) (+ x y)))])
+                                   ((twice (add 1)) 3))))
+                   ; - add got inlined because it returned a function
+                   ; - twice got inlined because its argument was a function
+                   ; - f got global-lifted because local functions aren't allowed
+                   (p '(let ([x1 1]
+                             [f (lambda (x y) (+ x y))])
+                         (let ([x2 3]) (f x1 (f x1 x2))))))
+
+  ; remove all functions (MongoDB aggregation expression)
+  ; TODO bug here is that we don't simplify args - don't realize they are known functions.
+  (check-equal? (simplify #:allow-functions #f
+                          (p '(let ([twice (lambda (f) (lambda (x) (f (f x))))]
+                                    [add (lambda (x)
+                                           ; this local function must be removed
+                                           (lambda (y) (+ x y)))])
+                                ((twice (add 1)) 3))))
+                ; - add got inlined because it returned a function
+                ; - twice got inlined because its argument was a function
+                ; - f got inlined because functions aren't allowed
+                (p '(let ([x1 1])
+                      (let ([x2 3])
+                        (let ([y (let ([y x2])
+                                   (+ x1 y))])
+                          (+ x1 y))))))
+
+  ; remove all functions, and let binding (MongoDB find expression)
+  '''(check-equal? (simplify #:allow-let-binding #f
+                             (p '(let ([twice (lambda (f) (lambda (x) (f (f x))))]
+                                       [add (lambda (x)
+                                              ; this local function must be removed
+                                              (lambda (y) (+ x y)))])
+                                   ((twice (add 1)) 3))))
+                   ; - everything got inlined!!
+                   ; - requires knowing that (+ 1 3) has no side effects and can be inlined!
+                   (p '(+ 1 (+ 1 3))))
+
+  ;;
+  )
