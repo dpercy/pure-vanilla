@@ -50,21 +50,16 @@
     [(Call func args) `(,(render func) ,@(map render args))]
     [(If t c a) `(if ,(render t) ,(render c) ,(render a))]))
 
-(define (subst e h)
-  ; TODO hygiene
-  (define (r e) (subst e h))
-  (match e
-    [(Quote _) e]
-    [(Var x) (hash-ref h x (lambda () e))]
-    [(Lambda params body)
-     (define params* (map gensym params))
-     (define h* (for/fold ([h h]) ([p params]
-                                   [p* params*])
-                  (hash-set h p (Var p*))))
-     (Lambda params* (subst body h*))]
-    [(If t c a) (If (r t) (r c) (r a))]
-    [(Call f args) (Call (r f) (map r args))]))
+; split an expression by peeling off any bindings around it.
+(define (split expr) ; (list (-> expr expr) expr)
+  (match expr
+    [(Call (Lambda params body) args)
 
+     (let ([ctx (lambda (body)
+                  (Call (Lambda params body) args))])
+       (match (split body)
+         [(list ctx-inner body*) (list (compose ctx ctx-inner) body*)]))]
+    [_ (list values expr)]))
 
 #|
 
@@ -83,11 +78,6 @@ Mental model:
 
 
 Strategies:
-- lift defs as high as they go (but no higher)
-.  - can result in defs becoming global
-.  - doesn't add indirection
-.  - ensures all fun-defs are named
-
 - inline fun-calls to prevent their arguments from escaping
 - inline fun-calls when the call isn't allowed
 - inline let-bound values when let-binding isn't allowed
@@ -101,6 +91,7 @@ Strategies:
 .   - could fail if inlining blows up
 
 - lift bindings surrounding a callee to connect call and callee
+- lift bindings surrounding an argument to make the argument inlinable
 - generally, just always lift a let around a call.
 
 
@@ -155,7 +146,7 @@ Which transformations enable each other?
                      (match (lookup name)
 
                        ; known function - can inline if necessary
-                       [(BindLet _ env* used (app force (? Lambda? lam)))
+                       [(BindLet _ env* used (app force (list _ (? Lambda? lam))))
 
                         ; need to inline if:
                         ; - functions aren't allowed
@@ -212,17 +203,25 @@ Which transformations enable each other?
                            (BindLet a env (box #false)
                                     (delay
                                       (displayln (list 'operand a 'start))
-                                      (let ([v (simplify a
-                                                         env
-                                                         (ContextValue))])
+                                      (let ([v (split (simplify a
+                                                                env
+                                                                (ContextValue)))])
                                         (displayln (list 'operand a 'got v))
                                         v)))))
        (define callee-context (ContextCall context arg-binds))
-       (define func* (simplify func env callee-context))
+       (match-define (list func-wrapper func*) (split (simplify func env callee-context)))
        ; TODO check whether arguments were used.
-       (Call func* (for/list ([ab arg-binds])
-                     (match ab
-                       [(BindLet _ _ _ simplified) (force simplified)])))]
+
+       (define arg-wrapper (apply compose (for/list ([ab arg-binds])
+                                            (match ab
+                                              [(BindLet _ _ _ (app force (list ctx _))) ctx]))))
+
+       (func-wrapper
+        (arg-wrapper
+         (Call func* (for/list ([ab arg-binds])
+                       (match ab
+                         [(BindLet _ _ _ (app force (list _ simplified-value)))
+                          simplified-value])))))]
 
       [(If test consq alt)
        ; TODO introduce ContextTest?
@@ -257,9 +256,9 @@ Which transformations enable each other?
                          (let ([x2 3]) (f x1 (f x1 x2))))))
 
   ; remove all functions (MongoDB aggregation expression)
-  ; TODO bug here is that we don't simplify args - don't realize they are known functions.
+  ; TODO bug here is just dead bindings
   (check-equal? (simplify #:allow-functions #f
-                          (p '(let ([twice (lambda (f) (lambda (x) (f (f x))))]
+                          (p '(let ([twice (lambda (f) (lambda (n) (f (f n))))]
                                     [add (lambda (x)
                                            ; this local function must be removed
                                            (lambda (y) (+ x y)))])
@@ -267,11 +266,13 @@ Which transformations enable each other?
                 ; - add got inlined because it returned a function
                 ; - twice got inlined because its argument was a function
                 ; - f got inlined because functions aren't allowed
-                (p '(let ([x1 1])
-                      (let ([x2 3])
-                        (let ([y (let ([y x2])
-                                   (+ x1 y))])
-                          (+ x1 y))))))
+                (p '(let ([x 1])
+                      (let ([n 3])
+                        ; TODO actually this other let will lift,
+                        ;      and both get renamed.
+                        (let ([y (let ([y n])
+                                   (+ x y))])
+                          (+ x y))))))
 
   ; remove all functions, and let binding (MongoDB find expression)
   '''(check-equal? (simplify #:allow-let-binding #f
