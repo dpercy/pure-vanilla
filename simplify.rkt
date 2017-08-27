@@ -13,8 +13,6 @@
 (require 'helpers)
 (begin-for-syntax (require 'helpers))
 
-(struct Just (value) #:transparent)
-
 
 
 (struct Expr () #:transparent
@@ -77,7 +75,7 @@ Mental model:
 .   - parameters
 
 
-Strategies:
+Tactics:
 - inline fun-calls to prevent their arguments from escaping
 - inline fun-calls when the call isn't allowed
 - inline let-bound values when let-binding isn't allowed
@@ -93,6 +91,13 @@ Strategies:
 - lift bindings surrounding a callee to connect call and callee
 - lift bindings surrounding an argument to make the argument inlinable
 - generally, just always lift a let around a call.
+
+
+Strategy:
+- start with Dybvig's "unrestrained algorithm"
+- add cycle detection - this is deterministic
+- don't use effort counters - this is not really deterministic
+- let the algorithm keep searching???
 
 
 Which transformations enable each other?
@@ -136,39 +141,50 @@ Which transformations enable each other?
 
       [(Quote _) expr]
 
-      [(Var name) (match context
+      [(Var name) (let ()
+                    (define (residualize)
+                      (match (lookup name)
+                        [(BindLet _ _ used _) (set-box! used #true)]
+                        [_ (void)])
+                      expr)
+                    (match context
 
-                    ; just residualize the var
-                    [(ContextValue) expr]
+                      ; just residualize the var
+                      [(ContextValue) (residualize)]
 
-                    ; maybe can inline
-                    [(ContextCall outer-context arg-binds)
-                     (match (lookup name)
+                      ; maybe can inline
+                      [(ContextCall outer-context arg-binds)
+                       (match (lookup name)
 
-                       ; known function - can inline if necessary
-                       [(BindLet _ env* used (app force (list _ (? Lambda? lam))))
+                         ; bound to a known operand
+                         [(BindLet _ env* used simplified)
+                          (match (force simplified)
+                            [(list _ (? Lambda? lam))
+                             ; operand is a function
+                             ; need to inline if:
+                             ; - functions aren't allowed
+                             ; - an arg is a function, and first-class functions aren't allowed
+                             ; - callee returns a function, and first-class functions aren't allowed
+                             ; - otherwise don't inline
 
-                        ; need to inline if:
-                        ; - functions aren't allowed
-                        ; - an arg is a function, and first-class functions aren't allowed
-                        ; - callee returns a function, and first-class functions aren't allowed
-                        ; - otherwise don't inline
+                             ; For now let's inline only if functions aren't allowed.
+                             (cond
+                               ; Instead of returning the var,
+                               ; get the lambda it's bound to, and keep simplifying that.
+                               [(not allow-functions)
+                                (displayln (list 'inline name))
+                                (define v (simplify lam env* context))
+                                (displayln (list 'inlined name 'to v))
+                                v]
 
-                        ; For now let's inline only if functions aren't allowed.
-                        (cond
-                          ; Instead of returning the var,
-                          ; get the lambda it's bound to, and keep simplifying that.
-                          [(not allow-functions)
-                           (displayln (list 'inline name))
-                           (define v (simplify lam env* context))
-                           (displayln (list 'inlined name 'to v))
-                           v]
+                               ; decided not to inline - residualize
+                               [else (residualize)])]
 
-                          ; decided not to inline - residualize
-                          [else expr])]
+                            ; bound to something else
+                            [_ (residualize)])]
 
-                       ; can't inline - residualize
-                       [_ expr])])]
+                         ; not bound to a known operand
+                         [_ (residualize)])]))]
 
       [(Lambda params body)
 
@@ -212,16 +228,48 @@ Which transformations enable each other?
        (match-define (list func-wrapper func*) (split (simplify func env callee-context)))
        ; TODO check whether arguments were used.
 
-       (define arg-wrapper (apply compose (for/list ([ab arg-binds])
-                                            (match ab
-                                              [(BindLet _ _ _ (app force (list ctx _))) ctx]))))
+       (match func*
+         [(Lambda params body)
+          ; If the function is a lambda, we can drop any unused bindings.
 
-       (func-wrapper
-        (arg-wrapper
-         (Call func* (for/list ([ab arg-binds])
-                       (match ab
-                         [(BindLet _ _ _ (app force (list _ simplified-value)))
-                          simplified-value])))))]
+          ; TODO dedup this code with helpers / smart constructors like "make let"
+
+          (define arg-wrapper (apply compose (for/list ([ab arg-binds]
+                                                        #:when (and (BindLet? ab)
+                                                                    (unbox (BindLet-used ab))))
+                                               (match ab
+                                                 [(BindLet _ _ _ (app force (list ctx _))) ctx]))))
+
+          (func-wrapper
+           (arg-wrapper
+            (let ()
+              (define params* (for/list ([p params]
+                                         [ab arg-binds]
+                                         #:when (and (BindLet? ab)
+                                                     (unbox (BindLet-used ab))))
+                                p))
+              (define args* (for/list ([ab arg-binds]
+                                       #:when (and (BindLet? ab)
+                                                   (unbox (BindLet-used ab))))
+                              (match ab
+                                [(BindLet _ _ _ (app force (list _ simplified-value)))
+                                 simplified-value])))
+              (if (empty? params*)
+                  body
+                  (Call (Lambda params* body) args*)))))]
+         [_
+
+          ; Otherwise we have to keep all the unused arguments.
+          (define arg-wrapper (apply compose (for/list ([ab arg-binds])
+                                               (match ab
+                                                 [(BindLet _ _ _ (app force (list ctx _))) ctx]))))
+
+          (func-wrapper
+           (arg-wrapper
+            (Call func* (for/list ([ab arg-binds])
+                          (match ab
+                            [(BindLet _ _ _ (app force (list _ simplified-value)))
+                             simplified-value])))))])]
 
       [(If test consq alt)
        ; TODO introduce ContextTest?
