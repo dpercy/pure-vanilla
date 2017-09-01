@@ -27,6 +27,7 @@
   (struct Lambda Expr (params body) #:transparent)
   (struct Call Expr (func args) #:transparent)
   (struct If Expr (test consq alt) #:transparent)
+  (struct Ann Expr (comment expr) #:transparent)
 
   (define (parse form)
     (match form
@@ -36,7 +37,8 @@
       [`(lambda (,params ...) ,body) (Lambda params (parse body))]
       [`(if ,t ,c ,a) (If (parse t) (parse c) (parse a))]
       [`(let ([,x ,v] ...) ,body) (parse `((lambda ,x ,body) ,@v))]
-      [(cons (or 'quote 'lambda 'if 'let) _) (error 'parse "bad syntax: ~v" form)]
+      [`(ann ,v ,e) (Ann v (parse e))]
+      [(cons (or 'quote 'lambda 'if 'let 'ann) _) (error 'parse "bad syntax: ~v" form)]
       [`(,f ,args ...) (Call (parse f) (map parse args))]
       [_ (error 'parse "bad syntax: ~v" form)]))
 
@@ -48,7 +50,8 @@
       [(Call (Lambda params body) args) #:when (= (length params) (length args))
        `(let ,(map list params (map render args)) ,(render body))]
       [(Call func args) `(,(render func) ,@(map render args))]
-      [(If t c a) `(if ,(render t) ,(render c) ,(render a))])))
+      [(If t c a) `(if ,(render t) ,(render c) ,(render a))]
+      [(Ann v e) `(ann ,v ,(render e))])))
 (require 'core)
 (module+ test
   (check-equal? (parse 0) (Quote 0))
@@ -155,7 +158,10 @@
                           [(cons func args) (Call func args)])]
       [(If t c a) (match ((on-list rewriter) (list t c a))
                     [#false #false]
-                    [(list t c a) (If t c a)])]))
+                    [(list t c a) (If t c a)])]
+      [(Ann v e) (match (rewriter e)
+                   [#false #false]
+                   [e (Ann v e)])]))
   tr)
 
 
@@ -181,9 +187,9 @@
                 #false)
 
   (define zero-all-constants (iterate (deep dec-constant)))
-  (check-equal? (zero-all-constants (parse '(let ([x 5])
+  (check-equal? (zero-all-constants (parse '(let ([x (ann please-inline 5)])
                                               (if x 7 (+ 2 3)))))
-                (parse '(let ([x 0])
+                (parse '(let ([x (ann please-inline 0)])
                           (if x 0 (+ 0 0))))))
 
 
@@ -392,3 +398,29 @@
 ;      - You need to make this decision at the use site, not the def site,
 ;        because you might only want to inline the value when it's being projected,
 ;        because maybe its address is observable.
+
+
+(define/contract remove-hof rewriter?
+  ; TODO how can we make
+  )
+
+(module+ test
+
+  (check-equal? ((complete remove-hof)
+                 (p '(let ([twice (lambda (f x)
+                                    (f (f x)))]
+                           [add (lambda (x)
+                                  ; this local function must be removed
+                                  (lambda (y) (+ x y)))])
+                       (twice (add 1) 3))))
+                ; - add got inlined because it returned a function
+                ;    - decided at definition
+                ; - app-twice got inlined because its argument was a function
+                ;    - decided at call/use - TODO
+                '(let ([twice (lambda (f x)
+                                (f (f x)))])
+                   ; f remains a local function
+                   (let ([f (let ([x 1])
+                              (lambda (y) (+ x y)))]
+                         [x 3])
+                     (f (f x))))))
