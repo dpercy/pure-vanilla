@@ -1,5 +1,7 @@
 #lang racket
 
+
+(require (prefix-in racket: racket))
 (module+ test (require rackunit))
 
 (define-syntax-rule (define-structs (Name fields ...) ...)
@@ -45,23 +47,24 @@
        [_ (error 'Apply "got a non-pair: ~v" arg)])]))
 (module+ test
 
-  (define addC (match-lambda [(Pair x y) (+ x y)]))
-  (define mulC (match-lambda [(Pair x y) (* x y)]))
-  (define cosC cos)
-  (define sinC sin)
-  (define exl Pair-left)
-  (define exr Pair-right)
+  (let ()
+    (define addC (match-lambda [(Pair x y) (+ x y)]))
+    (define mulC (match-lambda [(Pair x y) (* x y)]))
+    (define cosC cos)
+    (define sinC sin)
+    (define exl Pair-left)
+    (define exr Pair-right)
 
-  (define sqr (Compose mulC (Fork (Id) (Id))))
-  (check-equal? (app sqr 4) 16)
+    (define sqr (Compose mulC (Fork (Id) (Id))))
+    (check-equal? (app sqr 4) 16)
 
-  (define magSqr (Compose addC
-                          (Fork (Compose mulC (Fork exl exl))
-                                (Compose mulC (Fork exr exr)))))
-  (check-equal? (app magSqr (Pair 3 4)) 25)
+    (define magSqr (Compose addC
+                            (Fork (Compose mulC (Fork exl exl))
+                                  (Compose mulC (Fork exr exr)))))
+    (check-equal? (app magSqr (Pair 3 4)) 25)
 
-  (define cosSinProd (Compose (Fork cosC sinC) mulC))
-  (check-equal? (app cosSinProd (Pair 2 3)) (Pair (cos 6) (sin 6)))
+    (define cosSinProd (Compose (Fork cosC sinC) mulC))
+    (check-equal? (app cosSinProd (Pair 2 3)) (Pair (cos 6) (sin 6))))
 
   )
 
@@ -77,11 +80,8 @@
          [_ #'expr])))))
 (define-syntax (reify stx)
   (define (peel form) (local-expand form 'expression
-                                    '()
-                                    #;(list #'#%plain-lambda
-                                          #'quote
-                                          #'#%plain-app
-                                          )))
+                                    '()))
+
   (syntax-case stx ()
     [(_ form)
 
@@ -95,8 +95,9 @@
           [(quote v) #'(Const (quote v))]
 
           [(#%plain-app U V) #'(Compose (Apply)
-                                  (Fork (reify (#%plain-lambda (x) U))
-                                        (reify (#%plain-lambda (x) V))))]
+                                        (Fork (reify (#%plain-lambda (x) U))
+                                              (reify (#%plain-lambda (x) V))))]
+
           [(#%plain-lambda (y) U)
            #'(Curry (reify
                      (#%plain-lambda ; function that accepts (x, y) pairs p
@@ -107,7 +108,7 @@
 
           [(#%expression body) #'(reify (#%plain-lambda (x) body))]
           [(let-values () body) #'(reify (#%plain-lambda (x) body))]
-          
+
 
           [e (raise-syntax-error 'reify "no inner case" stx #'e)])]
 
@@ -115,7 +116,19 @@
        ; final fallthrough case
        [e (raise-syntax-error 'reify "no outer case" stx #'e)])]))
 
-(reify (lambda (x) x))
-(reify (lambda (x) (quote 4)))
-(reify (lambda (x) (lambda (y) x)))
-(reify (lambda (x) (lambda (y) y)))
+
+(module+ test
+
+  (reify (lambda (x) x))
+  (reify (lambda (x) (quote 4)))
+  (reify (lambda (x) (lambda (y) x)))
+  (reify (lambda (x) (lambda (y) y)))
+
+  (define mul (curry *))
+  (define add (curry +))
+
+  (define sqr (reify (lambda (x) ((mul x) x))))
+  (app sqr 3)
+
+  ;;
+  )
