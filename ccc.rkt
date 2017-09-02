@@ -138,7 +138,7 @@
 
 
 (define (Const b)
-  (TF (F 'a (typeof b))
+  (TF (F 'a (rename (typeof b)))
       (lambda (a) b)))
 
 (define Id
@@ -198,8 +198,11 @@
   (unify tg (F 'g-in 'g-out) subst)
   (unify 'f-in 'g-in subst)
 
-  (TF (apply-subst subst (F 'in (P 'f-out 'g-out)))
+  (TF (apply-subst subst (F 'f-in (P 'f-out 'g-out)))
       (lambda (a) (Pair (f a) (g a)))))
+(module+ test
+  (check-match (typeof (Fork Id Id))
+               (F a (P a a))))
 
 (define (Curry f)
   ; need to ensure:
@@ -209,7 +212,7 @@
   (define subst (unify (rename (typeof f))
                        (F (P 'in-left 'in-right) 'out)))
 
-  (TF (apply-subst subst (F 'in-left (F 'in-right 'f-out)))
+  (TF (apply-subst subst (F 'in-left (F 'in-right 'out)))
       (lambda (a) (lambda (b) (f (Pair a b))))))
 
 (define Apply
@@ -241,14 +244,84 @@
 
 
   (define sqr (Compose mulC (Fork Id Id)))
+  (check-equal? (typeof sqr) (F "Number" "Number"))
   (check-equal? (sqr 4) 16)
 
   (define magSqr (Compose addC
                           (Fork (Compose mulC (Fork exl exl))
                                 (Compose mulC (Fork exr exr)))))
+  (check-equal? (typeof magSqr) (F (P "Number" "Number") "Number"))
   (check-equal? (magSqr (Pair 3 4)) 25)
 
   (define cosSinProd (Compose (Fork cosC sinC) mulC))
+  (check-equal? (typeof cosSinProd) (F (P "Number" "Number") (P "Number" "Number")))
   (check-equal? (cosSinProd (Pair 2 3)) (Pair (cos 6) (sin 6)))
 
   )
+
+
+(define self-quoting?
+  (or/c string?
+        number?
+        boolean?
+        ))
+(define (parse form)
+  (let parse ([form form]
+              [env (hash)])
+    (define (r form) (parse form env))
+    (match form
+      ; prim cases
+      [`(Lambda (,x) (Pair ,A ,B)) (Fork (r `(Lambda (,x) ,A))
+                                         (r `(Lambda (,x) ,B)))]
+      [`(Lambda (,x) (* ,A ,B)) (Compose mulC (r `(Lambda (,x) (Pair ,A ,B))))]
+      [`(Lambda (,x) (+ ,A ,B)) (Compose addC (r `(Lambda (,x) (Pair ,A ,B))))]
+      [`(Lambda (,x) exl) (Const exl)]
+      [`(Lambda (,x) exr) (Const exr)]
+      [`(Lambda (,x) cos) (Const cosC)]
+      [`(Lambda (,x) sin) (Const sinC)]
+
+      [`(Lambda (,x) ,x)  Id]
+      [`(Lambda (,x) ,(? symbol? y))  (if (hash-has-key? env y)
+                                          (r `(Lambda (,x) ,(hash-ref env y)))
+                                          (error 'parse "unbound ~v in ~v" y form))]
+      [`(Lambda (,x) (quote ,v)) (Const v)]
+      [`(Lambda (,x) ,(? self-quoting? v)) (Const v)]
+
+      [`(Lambda (,x) (,U ,V))  (Compose Apply
+                                        (Fork (r `(Lambda (,x) ,U))
+                                              (r `(Lambda (,x) ,V))))]
+      [`(Lambda (,x) (Lambda (,y) ,U))  (let* ([p (gensym (format "~s*~s" x y))]
+                                               [env (hash-set env x `(exl ,p))]
+                                               [env (hash-set env y `(exr ,p))])
+                                          (Curry
+                                           (parse `(Lambda (,p)
+                                                           ,U)
+                                                  env)))]
+      [`(Lambda ,params (Let ([,x ,e]) ,b))
+       (r `(Lambda ,params ((Lambda (,x) ,b) ,e)))]
+
+      ;;
+      )))
+(define-syntax-rule (Lambda body ...) (parse (quote (Lambda body ...))))
+(module+ test
+
+
+  (define Sqr (Lambda (x) (* x x)))
+  (check-equal? (Sqr 4) 16)
+  (check-equal? (typeof Sqr) (F "Number" "Number"))
+
+
+  (define MagSqr (Lambda (v)
+                         (Let ([x (exl v)])
+                              (Let ([y (exr v)])
+                                   (+ (* x x) (* y y))))))
+  (check-equal? (MagSqr (Pair 3 4)) 25)
+  (check-equal? (typeof MagSqr) (F (P "Number" "Number") "Number"))
+
+
+  (define CosSinProd (Lambda (p)
+                             (Let ([prod (* (exl p) (exr p))])
+                                  (Pair (cos prod)
+                                        (sin prod)))))
+  (check-equal? (CosSinProd (Pair 2 3)) (Pair (cos 6) (sin 6)))
+  (check-equal? (typeof CosSinProd) (F (P "Number" "Number") (P "Number" "Number"))))
