@@ -101,8 +101,23 @@
   (match* {after before}
     [{(Id) f} f]
     [{f (Id)} f]
+    [{(Const v) _} (Const v)]
+
+    ; This case is iffy if the function has side effects
+    [{f (Const v)} (Const (app f v))]
+
     [{(== Pair-left) (Fork left right)} left]
     [{(== Pair-right) (Fork left right)} right]
+    #;
+    [{(Apply) (Fork (Compose (Curry f) (== Pair-left))
+                    (== Pair-right))}
+     ; "universal property" from p2 http://conal.net/papers/compiling-to-categories/compiling-to-categories.pdf
+     f]
+
+    [{(Apply) (Fork (Const f) arg)}
+     ; If the function doesn't depend on the input to the Compose,
+     ; it doesn't need to be a first-class function.
+     (smart-Compose f arg)]
     [{_ _} (Compose after before)]))
 
 (require (for-syntax racket))
@@ -130,14 +145,14 @@
                                    #'(Const y))]
           [(quote v) #'(Const (quote v))]
 
-          [(#%plain-app f U) (and (identifier? #'f)
-                                  (not (bound-identifier=? #'x #'f)))
-           ; shortcut case to avoid higher-order plumbing:
-           ; (lambda (x) (f U)) == (Compose f (lambda (x) U))
-           #'(smart-Compose f (reify (#%plain-lambda (x) U)))]
+
           [(#%plain-app U V) #'(smart-Compose (Apply)
                                               (Fork (reify (#%plain-lambda (x) U))
                                                     (reify (#%plain-lambda (x) V))))]
+
+          ; Pair case!
+          [(#%plain-app Pair left right) #'(Fork (reify (#%plain-lambda (x) left))
+                                                 (reify (#%plain-lambda (x) right)))]
 
           [(#%plain-lambda (y) U)
            #'(Curry (reify
@@ -160,16 +175,35 @@
 
 (module+ test
 
-  (reify (lambda (x) x))
-  (reify (lambda (x) (quote 4)))
-  (reify (lambda (x) (lambda (y) x)))
-  (reify (lambda (x) (lambda (y) y)))
+  (check-equal? (reify (lambda (x) x)) (Id))
+  (check-equal? (reify (lambda (x) (quote 4))) (Const 4))
+  (check-equal? (reify (lambda (x) (lambda (y) x))) (Curry Pair-left))
+  (check-equal? (reify (lambda (x) (lambda (y) y))) (Curry Pair-right))
 
   (define mul (curry *))
   (define add (curry +))
 
+  (define mulPair (match-lambda [(Pair x y) (* x y)]))
+  (define addPair (match-lambda [(Pair x y) (+ x y)]))
+
   (define sqr (reify (lambda (x) ((mul x) x))))
   (app sqr 3)
+
+  (check-equal? (app (app (reify (lambda (x) (lambda (y) x))) 1) 2)
+                1)
+  (check-equal? (app (app (reify (lambda (x) (lambda (y) y))) 1) 2)
+                2)
+
+  (check-equal? (app (reify (lambda (x) 4)) (void))
+                4)
+
+  (define magsqr (reify (lambda (p)
+                          (addPair (Pair (mulPair (Pair (Pair-left p)
+                                                        (Pair-left p)))
+                                         (mulPair (Pair (Pair-right p)
+                                                        (Pair-right p))))))))
+  (check-equal? (app magsqr (Pair 3 4))
+                25)
 
   ;;
   )
