@@ -37,9 +37,9 @@
 
      ; The new argument flows into Id, gets paired with arg,
      ; then flows into tuple-acceptor.
-     (Compose tuple-acceptor
-              (Fork (Const arg)
-                    (Id)))]
+     (smart-Compose tuple-acceptor
+                    (Fork (Const arg)
+                          (Id)))]
     [(Apply)
      ; Apply accepts a (Pair f a) and returns (f a).
      (match arg
@@ -64,10 +64,46 @@
     (check-equal? (app magSqr (Pair 3 4)) 25)
 
     (define cosSinProd (Compose (Fork cosC sinC) mulC))
-    (check-equal? (app cosSinProd (Pair 2 3)) (Pair (cos 6) (sin 6))))
+    (check-equal? (app cosSinProd (Pair 2 3)) (Pair (cos 6) (sin 6)))
 
-  )
 
+
+    #|
+
+    What is this stuff??
+
+    1. Pipes
+
+    (Id)  is a an empty piece of pipe
+    (Compose after before)   lets you fit pipes together
+
+    2. Tuples
+    (Fork left right)  lets you put pipes next to each other, creating double-wires
+    exl                extracts a single value from a double-wire
+    exr
+
+
+    (Curry tuple-acceptor)
+    ; converts an (X, Y) acceptor into an X-acceptor-giving-Y-acceptor
+
+
+
+
+
+
+    |#
+
+
+    ;;
+    ))
+
+(define (smart-Compose after before)
+  (match* {after before}
+    [{(Id) f} f]
+    [{f (Id)} f]
+    [{(== Pair-left) (Fork left right)} left]
+    [{(== Pair-right) (Fork left right)} right]
+    [{_ _} (Compose after before)]))
 
 (require (for-syntax racket))
 (begin-for-syntax
@@ -94,9 +130,14 @@
                                    #'(Const y))]
           [(quote v) #'(Const (quote v))]
 
-          [(#%plain-app U V) #'(Compose (Apply)
-                                        (Fork (reify (#%plain-lambda (x) U))
-                                              (reify (#%plain-lambda (x) V))))]
+          [(#%plain-app f U) (and (identifier? #'f)
+                                  (not (bound-identifier=? #'x #'f)))
+           ; shortcut case to avoid higher-order plumbing:
+           ; (lambda (x) (f U)) == (Compose f (lambda (x) U))
+           #'(smart-Compose f (reify (#%plain-lambda (x) U)))]
+          [(#%plain-app U V) #'(smart-Compose (Apply)
+                                              (Fork (reify (#%plain-lambda (x) U))
+                                                    (reify (#%plain-lambda (x) V))))]
 
           [(#%plain-lambda (y) U)
            #'(Curry (reify
